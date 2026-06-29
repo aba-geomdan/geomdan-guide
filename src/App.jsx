@@ -31,8 +31,8 @@ const STORAGE_KEY_HISTORY_V2 = 'gd_aba_parent_guide_history_v2';
 // 관리자 기본 계정 (첫 실행 시 자동 생성)
 // 비밀번호는 빌드 시점 환경변수(.env)에서 주입 — 공개 소스에 평문을 남기지 않음
 const DEFAULT_ADMIN = {
-  id: 'admin',
-  name: '원장님',
+  id: '민다혜',
+  name: '민다혜 원장님',
   password: import.meta.env.VITE_ADMIN_PASSWORD || 'changeme',
   role: 'admin',
   createdAt: 0, // 첫 실행 시 채워짐
@@ -520,10 +520,10 @@ function safeRemoveLS(key) {
 // admin 기본 계정이 DB에 없으면 생성 (Supabase 모드)
 async function ensureAdminDB() {
   try {
-    const existing = await dbGetUser('admin');
+    const existing = await dbGetUser(DEFAULT_ADMIN.id);
     if (!existing) {
       await dbCreateUser({
-        id: 'admin',
+        id: DEFAULT_ADMIN.id,
         name: DEFAULT_ADMIN.name,
         role: 'admin',
         password: DEFAULT_ADMIN.password,
@@ -555,7 +555,7 @@ async function loadUsers() {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        if (!parsed.find(u => u.id === 'admin')) {
+        if (!parsed.find(u => u.id === DEFAULT_ADMIN.id)) {
           parsed.unshift({ ...DEFAULT_ADMIN, createdAt: Date.now() });
           safeSetLS(STORAGE_KEY_USERS, JSON.stringify(parsed));
         }
@@ -639,11 +639,13 @@ function logout() {
 // 선생님 계정 추가
 async function createTeacher(id, name, password) {
   const tId = (id || '').trim();
-  const tName = (name || '').trim();
+  let tName = (name || '').trim();
   if (!tId) return { ok: false, error: '아이디를 입력해주세요' };
-  if (!tName) return { ok: false, error: '선생님 이름을 입력해주세요' };
   if (!password || password.length < 4) return { ok: false, error: '비밀번호는 4자 이상' };
-  if (!/^[a-zA-Z0-9_-]+$/.test(tId)) return { ok: false, error: '아이디는 영문/숫자/_/-만 가능' };
+  // 아이디: 공백과 일부 특수문자만 금지 (한글/영문/숫자 허용)
+  if (/[\s/\\'"]/.test(tId)) return { ok: false, error: '아이디에 공백이나 특수문자는 쓸 수 없습니다' };
+  // 이름을 비우면 아이디를 이름으로 사용
+  if (!tName) tName = tId;
 
   if (supabaseConfigured()) {
     try {
@@ -666,7 +668,7 @@ async function createTeacher(id, name, password) {
 
 // 선생님 삭제
 async function deleteTeacher(userId) {
-  if (userId === 'admin') return { ok: false, error: '관리자는 삭제할 수 없습니다' };
+  if (userId === DEFAULT_ADMIN.id) return { ok: false, error: '관리자는 삭제할 수 없습니다' };
   if (supabaseConfigured()) {
     try {
       await dbDeleteUser(userId); // 가이드/즐겨찾기는 FK on delete cascade로 함께 삭제
@@ -1095,7 +1097,7 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
               <div style={adminStyles.formRow}>
                 <input
                   type="text"
-                  placeholder="아이디 (영문/숫자, 예: kim)"
+                  placeholder="아이디 (예: 민다솔)"
                   value={newId}
                   onChange={(e) => setNewId(e.target.value)}
                   autoCapitalize="off"
@@ -1107,7 +1109,7 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
                 />
                 <input
                   type="text"
-                  placeholder="선생님 이름 (예: 김선생)"
+                  placeholder="이름 (선택, 비우면 아이디 사용)"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   autoComplete="off"
@@ -1799,7 +1801,7 @@ export default function App() {
         try { setFavorites(JSON.parse(favRaw)); } catch (e) { setFavorites(DEFAULT_FAVORITES); }
       } else {
         const v2 = safeGetLS(STORAGE_KEY_FAVORITES_V2);
-        if (v2 && session.id === 'admin') {
+        if (v2 && session.id === DEFAULT_ADMIN.id) {
           safeSetLS(favoritesKey(session.id), v2);
           try { setFavorites(JSON.parse(v2)); } catch (e) { setFavorites(DEFAULT_FAVORITES); }
         } else {
@@ -1811,7 +1813,7 @@ export default function App() {
         try { setHistory(JSON.parse(histRaw)); } catch (e) { setHistory([]); }
       } else {
         const v2 = safeGetLS(STORAGE_KEY_HISTORY_V2);
-        if (v2 && dataUserId === 'admin') {
+        if (v2 && dataUserId === DEFAULT_ADMIN.id) {
           safeSetLS(historyKey(dataUserId), v2);
           try { setHistory(JSON.parse(v2)); } catch (e) { setHistory([]); }
         } else {
@@ -2286,10 +2288,11 @@ export default function App() {
   .footer {
     display: flex;
     justify-content: center;
+    text-align: center;
     margin-top: 16px;
     padding-top: 12px;
     border-top: 1px solid #fae8ee;
-    font-size: 11px;
+    font-size: 10.5px;
     color: #8a6571;
   }
   .print-controls {
@@ -2385,7 +2388,7 @@ export default function App() {
   </div>
 
   <div class="footer">
-    <span>검단ABA언어행동연구소</span>
+    <span>© 검단ABA언어행동연구소 · 민다혜 (BCBA) · 본 자료의 무단 복제 및 배포를 금합니다.</span>
   </div>
 </body>
 </html>`;
