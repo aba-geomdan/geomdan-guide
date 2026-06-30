@@ -200,7 +200,10 @@ function detectDomain(topic) {
 // ──────────────────────────────────────────────
 const DOMAIN_FIELDS = {
   language: {
-    function_analysis: '아이가 원하는 것을 말이나 몸짓으로 알리는 방법을 아직 충분히 못 배운 경우가 많습니다. 그래서 떼를 쓰거나 끌고 가는 식으로 표현하게 됩니다. 이번 주는 더 쉬운 표현 방법을 같이 알려주는 쪽으로 살펴보겠습니다.',
+    function_analysis: [
+      '아이가 원하는 것을 말이나 몸짓으로 알리는 방법을 아직 충분히 못 배운 경우가 많습니다. 그래서 떼를 쓰거나 끌고 가는 식으로 표현하게 됩니다. 이번 주는 더 쉬운 표현 방법을 같이 알려주는 쪽으로 살펴보겠습니다.',
+      '말로 표현하는 건 듣고, 떠올리고, 소리내는 여러 과정이 필요해서 시간이 걸립니다. 표현이 서툰 건 자연스러운 발달 과정입니다. 이번 주는 아이가 쉽게 쓸 수 있는 표현 방법을 하나씩 늘려가는 쪽으로 살펴보겠습니다.',
+    ],
     goal: '{name_ga} 원하는 것을 말·단어·카드 중 하나로 표현하는 것을 봅니다. 5번 중 2~3번 자발적으로 나오면 충분합니다. 발음이 완벽하지 않아도 시도 자체를 봐주세요.',
     materials: '{name}가 좋아하는 물건이나 간식 하나(표현할 동기가 되는 것).\n\n표현을 도울 그림카드나 사진, 또는 짧은 단어 목록.',
     practice: '1단계 (1분) - {name_ga} 원하는 것을 살짝 보이되 바로 주지 마세요. 표현할 이유를 만들어 줍니다.\n\n2단계 (2분) - 어머님이 먼저 단어나 카드를 짧게 보여주세요("주세요", "열어"). 그대로 따라 하거나 카드를 짚으면 됩니다.\n\n3단계 (2분) - 시도가 나오면 그 자리에서 바로 들어주세요. 표현하면 얻을 수 있다는 걸 빠르게 연결해 줍니다.',
@@ -209,7 +212,10 @@ const DOMAIN_FIELDS = {
     weekly_focus: '{name_ga} 말·단어·카드로 표현을 시도한 횟수',
   },
   selfcare: {
-    function_analysis: '스스로 하는 일상 동작은 여러 단계로 이루어져 있어서, 한 번에 다 해내기는 어렵습니다. 도움 없이 하려다 잘 안 되면 회피하거나 떼를 쓰기도 합니다. 이번 주는 한 단계씩 끊어서, 마지막 동작부터 스스로 해보게 하는 쪽으로 살펴보겠습니다.',
+    function_analysis: [
+      '스스로 하는 일상 동작은 여러 단계로 이루어져 있어서, 한 번에 다 해내기는 어렵습니다. 도움 없이 하려다 잘 안 되면 회피하거나 떼를 쓰기도 합니다. 이번 주는 한 단계씩 끊어서, 마지막 동작부터 스스로 해보게 하는 쪽으로 살펴보겠습니다.',
+      '일상생활 기술은 작은 동작들이 순서대로 이어져야 완성됩니다. 처음부터 끝까지 혼자 하기는 어려우니, 잘 안 되는 게 당연합니다. 이번 주는 마지막 한 동작부터 성공 경험을 쌓아가는 쪽으로 살펴보겠습니다.',
+    ],
     goal: '과정을 작은 단계로 나눠, {name_ga} 마지막 한 단계라도 스스로 하는 것을 봅니다. 5번 중 2~3번 나오면 충분합니다. 전부가 아니라 한 단계부터입니다.',
     materials: '평소 쓰던 그 도구를 그대로 준비하세요.\n\n순서를 보여줄 간단한 그림이나 사진(선택).',
     practice: '1단계 (1분) - 어머님이 대부분을 도와주시고, 맨 마지막 한 동작만 {name}에게 남겨주세요.\n\n2단계 (2분) - 그 마지막 동작을 {name_ga} 스스로 하게 두세요. 손을 살짝 받쳐주셔도 됩니다.\n\n3단계 (2분) - 익숙해지면 도와주는 양을 조금씩 줄여, 마지막에서 두 번째 단계도 맡겨보세요.',
@@ -218,7 +224,10 @@ const DOMAIN_FIELDS = {
     weekly_focus: '{name_ga} 스스로 한 단계를 해낸 횟수',
   },
   social: {
-    function_analysis: '상대와 눈을 맞추고 주고받는 것은 자연스럽게 되기까지 시간이 걸립니다. 관심이 없어서가 아니라, 주고받는 방법이 아직 익숙하지 않은 경우가 많습니다. 이번 주는 짧게라도 주고받는 순간을 늘려가는 쪽으로 살펴보겠습니다.',
+    function_analysis: [
+      '상대와 눈을 맞추고 주고받는 것은 자연스럽게 되기까지 시간이 걸립니다. 관심이 없어서가 아니라, 주고받는 방법이 아직 익숙하지 않은 경우가 많습니다. 이번 주는 짧게라도 주고받는 순간을 늘려가는 쪽으로 살펴보겠습니다.',
+      '함께 주고받는 상호작용은 상대를 보고, 기다리고, 맞추는 여러 능력이 한꺼번에 필요합니다. 아직 그 호흡이 익숙하지 않을 뿐입니다. 이번 주는 즐거운 주고받기로 그 순간을 늘려가는 쪽으로 살펴보겠습니다.',
+    ],
     goal: '{name_ga} 짧게라도 상대와 주고받는 순간을 봅니다. 5번 중 2~3번 나오면 충분합니다. 길게가 아니라 한 번의 주고받음부터입니다.',
     materials: '둘이 주고받을 수 있는 물건 하나(공, 블록, 좋아하는 장난감).\n\n마주 앉을 수 있는 조용한 공간.',
     practice: '1단계 (1분) - {name}와 마주 앉으세요. 좋아하는 물건을 어머님이 들고, {name_ga} 쳐다보는 순간을 기다립니다.\n\n2단계 (2분) - 눈이 마주치거나 손을 내밀면 바로 건네주세요. 그 주고받음이 핵심입니다.\n\n3단계 (2분) - "주고-받고"를 짧게 반복하세요. 차례를 기다리는 연습도 자연스럽게 됩니다.',
@@ -227,7 +236,10 @@ const DOMAIN_FIELDS = {
     weekly_focus: '{name_ga} 상대와 주고받기(눈맞춤·차례)를 한 횟수',
   },
   cognition: {
-    function_analysis: '맞히거나 분류하는 과제는 보기가 많으면 어렵게 느껴집니다. 틀려서가 아니라, 한 번에 고를 것이 많아 헷갈리는 경우가 많습니다. 이번 주는 보기를 줄여 쉽게 시작하고, 성공 경험을 쌓는 쪽으로 살펴보겠습니다.',
+    function_analysis: [
+      '맞히거나 분류하는 과제는 보기가 많으면 어렵게 느껴집니다. 틀려서가 아니라, 한 번에 고를 것이 많아 헷갈리는 경우가 많습니다. 이번 주는 보기를 줄여 쉽게 시작하고, 성공 경험을 쌓는 쪽으로 살펴보겠습니다.',
+      '고르고 분류하는 과제는 한 번에 처리할 정보가 많으면 부담이 됩니다. 능력이 없어서가 아니라 선택지가 많아 헷갈리는 것입니다. 이번 주는 쉬운 단계부터 시작해 맞히는 즐거움을 느끼게 하는 쪽으로 살펴보겠습니다.',
+    ],
     goal: '{name_ga} 한 번에 맞히거나 분류하는 것을 봅니다. 5번 중 2~3번 나오면 충분합니다. 처음엔 보기를 2개로 줄여 쉽게 시작하세요.',
     materials: '과제에 맞는 카드나 물건 2~3개(보기 수를 적게).\n\n맞췄을 때 줄 작은 보상(좋아하는 것).',
     practice: '1단계 (1분) - 보기를 2개만 놓고 시작하세요. "○○ 어디 있어?" 한 가지만 물어봅니다.\n\n2단계 (2분) - {name_ga} 망설이면 정답 쪽을 살짝 가리켜 도와주세요. 맞으면 바로 다음으로 넘어갑니다.\n\n3단계 (2분) - 익숙해지면 보기를 하나 더 늘리거나, 도움을 줄여보세요. 한 번에 하나만 올립니다.',
@@ -236,7 +248,10 @@ const DOMAIN_FIELDS = {
     weekly_focus: '{name_ga} 스스로 맞힌 횟수',
   },
   behavior: {
-    function_analysis: '아이가 보이는 행동에는 대개 이유가 있습니다. 불편함을 알리거나, 무언가를 피하거나 얻으려는 나름의 방법인 경우가 많습니다. 이번 주는 그 행동을 무작정 막기보다, 대신할 수 있는 다른 행동을 같이 알려주는 쪽으로 살펴보겠습니다.',
+    function_analysis: [
+      '아이가 보이는 행동에는 대개 이유가 있습니다. 불편함을 알리거나, 무언가를 피하거나 얻으려는 나름의 방법인 경우가 많습니다. 이번 주는 그 행동을 무작정 막기보다, 대신할 수 있는 다른 행동을 같이 알려주는 쪽으로 살펴보겠습니다.',
+      '겉으로 드러나는 행동 뒤에는 대개 표현하고 싶은 무언가가 있습니다. 잘못된 행동이라기보다 더 나은 표현 방법을 아직 못 배운 신호입니다. 이번 주는 그 자리를 대신할 행동을 같이 찾아주는 쪽으로 살펴보겠습니다.',
+    ],
     goal: '그 행동 대신 할 수 있는 다른 행동 하나를 정해, {name_ga} 그쪽을 택하는 것을 봅니다. 하루에 1~2번이라도 나오면 충분합니다. 없애기보다 바꿔주기입니다.',
     materials: '{name_ga} 그 행동을 보이기 직전의 신호를 적을 메모.\n\n대신할 행동을 도울 도구(예: "그만" 카드, 진정용 물건).',
     practice: '1단계 (1분) - 그 행동이 나오기 직전의 신호를 살펴보세요. 그 순간이 개입 시점입니다.\n\n2단계 (2분) - 행동이 커지기 전에, 미리 정한 대체 행동을 하도록 도와주세요(예: "그만" 카드 짚기, 자리 옮기기).\n\n3단계 (2분) - 대체 행동이 나오면 바로 들어주세요. 도전행동보다 그쪽이 빠르게 통한다는 걸 경험하게 합니다.',
@@ -641,7 +656,25 @@ const GUIDE_FIELDS = ['function_analysis', 'goal', 'materials', 'practice', 'wai
 
 // AI 없이 로컬 템플릿으로 가이드 본문(9필드) 생성
 // domainId: 영역(없으면 주제에서 자동 판별)
-function buildLocalGuide(topic, fn, childName, otherDetail, domainId) {
+// 배열이면 seed로 하나 선택, 문자열이면 그대로. (크레딧 없이 다양화)
+function pickVariant(val, seed) {
+  if (Array.isArray(val)) {
+    if (val.length === 0) return '';
+    return val[((seed % val.length) + val.length) % val.length];
+  }
+  return val || '';
+}
+
+// 도입부 여러 버전 (seed로 선택)
+const INTRO_VARIANTS = [
+  '어머님, 오늘 {NM}가 센터에서 열심히 노력했습니다. 이번 주는 {EUL} 집에서도 같이 짧게 연습해 보시려고 합니다.',
+  '어머님, 오늘도 {NM}가 센터에서 잘 해주었습니다. 이번 주는 {EUL} 집에서도 짧게 이어가 보시면 좋겠습니다.',
+  '어머님, {NM}가 오늘 센터에서 한 걸음 더 나아갔습니다. 이번 주 가정에서는 {EUL} 5분만 함께 연습해 보세요.',
+  '어머님, 오늘 {NM}와 센터에서 의미 있는 시간을 보냈습니다. 이번 주는 {EUL} 집에서도 부담 없이 같이 해보시려고 합니다.',
+];
+
+function buildLocalGuide(topic, fn, childName, otherDetail, domainId, seed) {
+  const s = Number.isFinite(seed) ? seed : 0;
   const baseFn = GUIDE_TEMPLATES[fn.id] || GUIDE_TEMPLATES.other;
   const dom = domainId || detectDomain(topic);
   const domFields = DOMAIN_FIELDS[dom] || {};
@@ -660,15 +693,18 @@ function buildLocalGuide(topic, fn, childName, otherDetail, domainId) {
     topic_gwa: topicPlus(topic, '과', '와'),
   };
 
-  // 도입부: 센터에서의 구체적 장면은 지어내지 않는다.
+  // 도입부: 여러 버전 중 seed로 선택
   const nm = callNameOr(childName);
-  let intro = `어머님, 오늘 ${nm}가 센터에서 열심히 노력했습니다. `;
-  intro += `이번 주는 ${vars.topic_eul} 집에서도 같이 짧게 연습해 보시려고 합니다.`;
+  const introTpl = pickVariant(INTRO_VARIANTS, s);
+  let intro = introTpl
+    .replace(/\{NM\}/g, nm)
+    .replace(/\{EUL\}/g, vars.topic_eul);
 
-  // 우선순위: 커스텀 > 주제전용 > 영역 > 기능
+  // 우선순위: 커스텀 > 주제전용 > 영역 > 기능. 각 항목이 배열이면 seed로 변형 선택.
   const fields = {};
   GUIDE_FIELDS.forEach((k) => {
-    const src = customTpl[k] || topicTpl[k] || domFields[k] || baseFn[k] || '';
+    const raw = customTpl[k] || topicTpl[k] || domFields[k] || baseFn[k] || '';
+    const src = pickVariant(raw, s);
     fields[k] = fillTemplate(src, vars);
   });
 
@@ -1991,6 +2027,7 @@ export default function App() {
   const [guide, setGuide] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [guideSeed, setGuideSeed] = useState(0);
   const [favorites, setFavorites] = useState(DEFAULT_FAVORITES);
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -2132,11 +2169,14 @@ export default function App() {
     saveFavorites(favorites.filter(f => f !== item));
   };
 
-  const generateGuide = async (overrideTopic, overrideFunction) => {
+  const generateGuide = async (overrideTopic, overrideFunction, seedOverride) => {
     const t = (overrideTopic ?? topic).trim();
     const fn = overrideFunction ?? selectedFunction;
     if (!t) { setError('주제를 입력해주세요.'); return; }
     if (!fn) { setError('예상 행동 기능을 선택해주세요.'); return; }
+    // seed 결정: 다시 생성이면 이전 +1, 새 생성이면 0
+    const seed = Number.isFinite(seedOverride) ? seedOverride : 0;
+    setGuideSeed(seed);
     setTopic(t);
     setSelectedFunction(fn);
     setLoading(true);
@@ -2150,7 +2190,7 @@ export default function App() {
       const required = ['intro','goal','function_analysis','materials','practice','waiting','reinforcement','weekly_focus','next_priority'];
 
       // 항상 템플릿 결과를 먼저 준비 (AI 실패 시 폴백 + AI 누락 필드 보강)
-      const fallback = buildLocalGuide(t, fn, childName.trim(), otherDetail.trim(), domId);
+      const fallback = buildLocalGuide(t, fn, childName.trim(), otherDetail.trim(), domId, seed);
 
       let parsed = fallback;
       let usedAI = false;
@@ -3640,6 +3680,7 @@ export default function App() {
           <div className="no-print app-action-row" style={styles.actionRow}>
             {!isEditing ? (
               <>
+                <button onClick={() => generateGuide(topic, selectedFunction, guideSeed + 1)} style={styles.actionBtn} className="app-action-btn" disabled={loading}>🔄 다시 생성</button>
                 <button onClick={startEditing} style={styles.editBtn} className="app-action-btn">✎ 수정</button>
                 <button onClick={copyToClipboard} style={styles.actionBtn} className="app-action-btn">어머님께 전송용 텍스트 복사</button>
                 <button onClick={handlePrint} style={styles.actionBtn} className="app-action-btn">PDF / 인쇄</button>
