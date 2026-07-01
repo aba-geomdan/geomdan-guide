@@ -5,7 +5,7 @@ import {
   dbListGuides, dbInsertGuide, dbDeleteGuide, dbUpdateGuide,
   dbGetFavorites, dbSetFavorites,
   dbGetCustomTemplates, dbSetCustomTemplates,
-  verifyPassword,
+  dbVerifyLogin,
 } from './supabase.js';
 
 // ───────── 스토리지 키 (사용자별 분리 v3) ─────────
@@ -873,16 +873,16 @@ async function authenticate(id, password) {
 
   if (supabaseConfigured()) {
     await ensureAdminDB();
-    let user;
+    let result;
     try {
-      user = await dbGetUser(trimmedId);
+      result = await dbVerifyLogin(trimmedId, password);
     } catch (e) {
       return { ok: false, error: '서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.' };
     }
-    if (!user) return { ok: false, error: '존재하지 않는 아이디입니다' };
-    if (user.is_active === false) return { ok: false, error: '비활성화된 계정입니다' };
-    const ok = await verifyPassword(password, user.pw_salt, user.pw_hash);
-    if (!ok) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
+    if (!result || !result.ok) {
+      return { ok: false, error: (result && result.error) || '로그인에 실패했습니다' };
+    }
+    const user = result.user;
     const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
     safeSetLS(STORAGE_KEY_SESSION, JSON.stringify(session));
     return { ok: true, user: session };
