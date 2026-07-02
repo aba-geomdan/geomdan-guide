@@ -2654,12 +2654,14 @@ export default function App() {
   const timerRef = useRef(null);
   const inputRef = useRef(null);
 
-  // 첫 마운트: 커스텀 템플릿 캐시만 로드 (자동 로그인 사용 안 함)
-  // 앱을 켤 때마다 직접 로그인하도록, 저장된 세션은 복원하지 않고 지운다.
+  // 첫 마운트: 커스텀 템플릿 캐시 로드 + 저장된 세션 복원 (로그인 상태 유지)
   useEffect(() => {
     (async () => {
       await refreshCustomTemplates();
-      try { safeRemoveLS(STORAGE_KEY_SESSION); } catch (e) {}
+      try {
+        const restored = await loadSession();
+        if (restored) setSession(restored);
+      } catch (e) {}
     })();
   }, []);
 
