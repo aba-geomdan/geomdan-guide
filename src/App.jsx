@@ -24,6 +24,9 @@ function historyKey(userId) {
 const STORAGE_KEY_USERS = 'gd_aba_users_v1';
 const STORAGE_KEY_SESSION = 'gd_aba_session_v1';
 
+// claude-relay(Edge Function) 호출 인증용 anon key. VITE_SUPABASE_ANON_KEY와 동일.
+const AI_RELAY_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkdWJncnh3aWp5ZHdmYWJ3cG5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDk1ODgsImV4cCI6MjA5NzE4NTU4OH0.nqNO3vany3M6fzmG5BG6QVdvi8BW2UbhTDhxNnwvA88';
+
 // 호환성용 (마이그레이션에 사용)
 const STORAGE_KEY_FAVORITES_V2 = 'gd_aba_parent_guide_favorites_v2';
 const STORAGE_KEY_HISTORY_V2 = 'gd_aba_parent_guide_history_v2';
@@ -82,9 +85,16 @@ const FUNCTIONS = [
     color: '#d97a92',
   },
   {
+    id: 'skill',
+    label: '기술 습득 (문제행동 아님)',
+    desc: '문제행동이 아니라, 새로운 기술·활동을 단계적으로 가르칠 때',
+    example: '예) 가위질, 색칠, 블록 쌓기, 젓가락질, 숟가락질, 단추 끼우기',
+    color: '#5a8a6a',
+  },
+  {
     id: 'other',
     label: '기타 / 복합',
-    desc: '위 4가지에 딱 맞지 않거나 여러 기능이 섞여 있을 때',
+    desc: '위에 딱 맞지 않거나 여러 기능이 섞여 있을 때',
     example: '예) 기능 파악이 어려운 경우, 상황별로 기능이 바뀌는 경우',
     color: '#7a3a52',
   },
@@ -395,9 +405,9 @@ const TOPIC_TEMPLATES = [
       },
       materials: '아이용 칫솔과 평소 쓰던 치약(양은 쌀알만큼만).\n\n거울, 그리고 양치 순서를 보여줄 간단한 그림(선택).',
       practice: {
-        early: '1단계 (1분) - 거울 앞에서 어머님이 먼저 닦는 모습을 보여주세요.\n\n2단계 (2분) - 어머님이 칫솔을 잡고 거의 다 닦아주되, {name_ga} 칫솔을 입에 대보는 한 동작만 함께 해보세요.\n\n3단계 (2분) - 거부 없이 칫솔을 물면 바로 칭찬하고 끝내 주세요.',
-        mid: '1단계 (1분) - 어머님이 손을 받쳐 함께 닦다가, 맨 마지막 몇 번은 {name}가 스스로 움직이게 두세요.\n\n2단계 (2분) - 스스로 위아래로 닦아보게 하고, 안 닦인 곳만 도와주세요.\n\n3단계 (2분) - 한 부분이라도 스스로 닦으면 바로 칭찬하고 끝냅니다.',
-        high: '1단계 (1분) - {name_ga} 스스로 칫솔질을 시작하게 두고, 어머님은 거울 옆에서 지켜보세요.\n\n2단계 (2분) - 빠뜨리는 부위만 말로 알려주세요("아래쪽도").\n\n3단계 (2분) - 거의 다 닦으면 안 닦인 곳만 마무리해 주세요.',
+        early: '1단계 (1분) — 거울 앞에서 "엄마 먼저 쓱쓱~" 하며 닦는 모습을 크게 보여주세요.\n→ 아이가 쳐다보게 만드는 단계입니다. 과장된 동작으로 관심을 모읍니다.\n\n2단계 (2분) — 칫솔을 {name} 손에 함께 쥐고 "쓱, 한 번만~" 하며 입에 대보는 딱 한 동작만 같이 합니다.\n→ 손을 받쳐 함께 움직이는 촉구입니다. 나머지는 어머님이 닦아주셔도 됩니다.\n\n3단계 (2분) — 거부 없이 칫솔을 물면 "우와, 물었네!" 하고 바로 끝내 주세요.\n→ 성공 직후 바로 반응해 "양치는 무섭지 않다"를 연결합니다.',
+        mid: '1단계 (1분) — "같이 쓱쓱~" 하며 손을 받쳐 함께 닦다가, 마지막 몇 번은 손을 슬쩍 떼어 {name} 스스로 움직이게 둡니다.\n→ 도움을 조금씩 줄이는 단계입니다. 떼는 순간을 놓치지 마세요.\n\n2단계 (2분) — "위아래로 쓱쓱" 하고 시범을 보인 뒤 3초 기다려, 스스로 닦아보게 합니다.\n→ 기다리는 3초가 스스로 할 기회입니다. 안 닦인 곳만 살짝 도와주세요.\n\n3단계 (2분) — 한 부분이라도 스스로 닦으면 "혼자 닦았네!" 하고 바로 끝냅니다.\n→ 결과보다 스스로 한 시도를 즉시 인정합니다.',
+        high: '1단계 (1분) — "{name} 먼저 해볼까?" 하고 칫솔을 건넨 뒤, 어머님은 거울 옆에서 지켜봅니다.\n→ 스스로 시작할 기회를 먼저 줍니다. 바로 개입하지 않습니다.\n\n2단계 (2분) — 빠뜨리는 곳이 보이면 "아래쪽도~" 하고 말로만 알려주세요.\n→ 손대신 말로 하는 촉구입니다. 스스로 찾아 닦게 합니다.\n\n3단계 (2분) — 거의 다 닦으면 "꼼꼼하게 했네" 하고, 안 닦인 곳만 마무리해 주세요.\n→ 도움을 최소로 줄여 자립에 가깝게 만듭니다.',
       },
       waiting: {
         early: '{name_ga} 입을 안 벌리거나 칫솔을 밀어내도, 절대 억지로 밀어넣지 마세요. 오늘은 칫솔을 입에 대보는 것까지만으로 충분합니다. 거부가 심하면 바로 멈추세요.',
@@ -405,9 +415,9 @@ const TOPIC_TEMPLATES = [
         high: '{name_ga} 대충 닦고 끝내려 해도, 곧바로 지적하지 마세요. 잠깐 기다렸다가 빠뜨린 곳을 스스로 알아채는지 지켜보세요.',
       },
       reinforcement: {
-        early: '칫솔을 입에 대기만 해도 → "혼자 했네" 하고 바로 크게 칭찬해 주세요.\n\n거부 없이 잠깐이라도 물면 → 바로 끝내고 좋아하는 활동으로 이어주세요.\n\n이 단계는 "양치가 무섭지 않다"를 느끼게 하는 게 핵심입니다.',
-        mid: '스스로 몇 번 닦으면 → "위아래로 잘 닦네" 하고 바로 알아봐 주세요.\n\n한 부분이라도 스스로 하면 → 바로 칭찬하고 끝내 주세요.\n\n끝낸 뒤 좋아하는 활동으로 이어주면 거부감이 줄어듭니다.',
-        high: '스스로 대부분 닦으면 → "혼자 다 했네" 하고 인정해 주세요.\n\n빠뜨린 곳을 스스로 찾으면 → "꼼꼼하네" 하고 더 칭찬해 주세요.\n\n칭찬을 조금씩 줄여, 스스로 하는 습관 자체가 자리잡게 하세요.',
+        early: '칫솔을 입에 대기만 해도 → "우와, 물었네!" 하고 그 자리에서 바로 크게 반응해 주세요.\n\n거부 없이 잠깐이라도 물면 → 바로 끝내고 좋아하는 활동으로 이어주세요.\n\n이 단계는 칭찬을 아끼지 말고, "양치는 무섭지 않다"를 자주 느끼게 하는 것이 핵심입니다.',
+        mid: '스스로 몇 번 닦으면 → "위아래로 잘 닦네!" 하고 바로 알아봐 주세요.\n\n한 부분이라도 스스로 하면 → 그 순간 바로 칭찬하고 끝내 주세요.\n\n끝낸 직후 좋아하는 활동으로 이어주면, 양치 다음에 좋은 일이 온다는 걸 연결합니다.',
+        high: '스스로 대부분 닦으면 → "혼자 다 했네" 하고 분명히 인정해 주세요.\n\n빠뜨린 곳을 스스로 찾아 닦으면 → "꼼꼼하네!" 하고 특히 크게 반응해 주세요.\n\n칭찬을 조금씩 줄여, 스스로 닦는 습관 자체가 자리잡게 하세요.',
       },
       weekly_focus: {
         early: '{name_ga} 거부 없이 칫솔을 물거나 한 동작에 참여한 횟수',
@@ -1059,6 +1069,42 @@ const GUIDE_TEMPLATES = {
     next_priority:
       '이번 주에 모은 기록을 다음 센터 방문 때 같이 보겠습니다. 어떤 상황에서 자주 나오는지가 보이면, 거기에 맞춰 다음 주 방향을 정확히 잡을 수 있습니다.',
   },
+  skill: {
+    function_analysis:
+      '{topic_eun} 여러 동작이 순서대로 이어지는 기술이라, 한 번에 다 하기는 어렵습니다. 문제 행동이 아니라 아직 배우는 중인 기술이므로, 단계를 잘게 나눠 아이가 할 수 있는 부분부터 시작하는 것이 정확합니다.',
+    goal: {
+      early: '{name_ga} {topic} 과정 중 마지막 한 동작을 함께 해보는 것을 봅니다. 손을 받쳐 함께 하는 것으로 충분합니다.',
+      mid: '{name_ga} {topic} 과정 중 한두 단계를 스스로 해보는 것을 봅니다. 하루 한 번이라도 나오면 성공입니다.',
+      high: '{name_ga} {topic_eul} 처음부터 끝까지 거의 혼자 해보는 것을 봅니다. 어려운 부분만 도와주세요.',
+    },
+    materials:
+      '{topic}에 필요한 도구(집에 있는 것으로).\n\n아이가 편하게 앉아 집중할 수 있는 공간.',
+    practice: {
+      early: '1단계 (1분) — 어머님이 "이렇게~" 하며 {topic_eul} 천천히 시범 보여주세요.\n→ 아이가 동작을 눈으로 익히는 단계입니다.\n\n2단계 (2분) — 아이 손을 받쳐 마지막 한 동작만 함께 해보세요.\n→ 손을 받쳐 함께 하는 촉구입니다. 나머지는 어머님이 하셔도 됩니다.\n\n3단계 (2분) — 살짝이라도 스스로 움직이면 "같이 했네!" 하고 바로 알아봐 주세요.\n→ 참여 자체를 인정해 "해볼 만하다"를 느끼게 합니다.',
+      mid: '1단계 (1분) — "이렇게 해볼까?" 하고 한 번 시범을 보이세요.\n→ 방법을 먼저 보여주는 단계입니다.\n\n2단계 (2분) — 한두 단계를 아이에게 맡기고, 3초 기다렸다 막히는 곳만 도와주세요.\n→ 기다리는 3초가 스스로 할 기회입니다.\n\n3단계 (2분) — 한 단계라도 스스로 하면 "혼자 했네!" 하고 바로 인정해 주세요.\n→ 결과보다 스스로 한 시도를 즉시 인정합니다.',
+      high: '1단계 (1분) — "{name} 먼저 해볼까?" 하고 아이가 스스로 시작하게 두세요.\n→ 스스로 시작할 기회를 먼저 줍니다.\n\n2단계 (2분) — 막히는 곳이 보이면 "다음은?" 하고 말로만 알려주세요.\n→ 손대신 말로 하는 촉구입니다.\n\n3단계 (2분) — 거의 다 하면 어려운 부분만 마무리를 도와주세요.\n→ 도움을 최소로 줄여 자립에 가깝게 만듭니다.',
+    },
+    waiting: {
+      early: '{name_ga} 잘 안 돼서 답답해해도, 억지로 시키지 마세요. 마지막 한 동작만 함께 하고 나머지는 도와주셔도 됩니다.',
+      mid: '{name_ga} 잘 안 돼도 바로 대신 해주지 마세요. 잠깐 기다리며 스스로 해볼 시간을 주세요.',
+      high: '{name_ga} 서툴러도 바로 고쳐주지 마세요. 끝까지 스스로 해보게 두고, 다 한 뒤에 함께 확인하세요.',
+    },
+    reinforcement: {
+      early: '마지막 동작에 손을 보태기만 해도 → "같이 했네!" 하고 바로 알아봐 주세요.\n\n거부 없이 참여하면 → 좋아하는 것으로 바로 이어주세요.\n\n이 단계는 잘하고 못하고보다, 참여 자체를 자주 인정하는 것이 핵심입니다.',
+      mid: '한 단계라도 스스로 하면 → "혼자 했네!" 하고 그 순간 바로 인정해 주세요.\n\n시도만 해도 → "해보려고 했구나" 하고 격려해 주세요.\n\n끝낸 뒤 좋아하는 활동으로 이어주면 기술 연습이 즐거워집니다.',
+      high: '거의 혼자 하면 → "다 혼자 했네" 하고 분명히 인정해 주세요.\n\n어려운 부분을 스스로 넘기면 → 그 순간을 특히 크게 알아봐 주세요.\n\n칭찬을 조금씩 줄여, 스스로 하는 것이 익숙해지게 하세요.',
+    },
+    weekly_focus: {
+      early: '{name_ga} {topic} 마지막 동작에 참여한 횟수',
+      mid: '{name_ga} {topic}에서 스스로 한 단계를 해낸 횟수',
+      high: '{name_ga} {topic_eul} 거의 혼자 해낸 횟수',
+    },
+    next_priority: {
+      early: '마지막 동작이 익숙해지면, 다음 주는 그 앞 단계까지 함께 넓혀가세요.',
+      mid: '한두 단계를 스스로 하면, 다음 주는 스스로 하는 단계를 하나씩 늘려가세요.',
+      high: '거의 혼자 하면, 다음 주는 도움 없이 처음부터 끝까지 해보도록 넓혀가세요.',
+    },
+  },
 };
 
 // 템플릿 문자열의 {name}, {topic} 등을 실제 값으로 치환
@@ -1190,7 +1236,12 @@ function buildLocalGuide(topic, fn, childName, otherDetail, domainId, seed, leve
   // 우선순위: 커스텀 > 주제전용 > 영역 > 기능. 수준/변형 선택 후 치환.
   const fields = {};
   GUIDE_FIELDS.forEach((k) => {
-    const raw = customTpl[k] || topicTpl[k] || domFields[k] || baseFn[k] || '';
+    // skill(기술습득)·other(기타)는 영역 일반 문구보다 기능 템플릿이 우선.
+    // (예: "가위질"이 사회성으로 분류돼도 기술습득 문구가 나오게)
+    const fnFirst = (fn.id === 'skill' || fn.id === 'other');
+    const raw = fnFirst
+      ? (customTpl[k] || topicTpl[k] || baseFn[k] || domFields[k] || '')
+      : (customTpl[k] || topicTpl[k] || domFields[k] || baseFn[k] || '');
     const src = resolve(raw);
     fields[k] = fillTemplate(src, vars);
   });
@@ -1203,6 +1254,77 @@ function buildLocalGuide(topic, fn, childName, otherDetail, domainId, seed, leve
 
   return { intro, ...fields, domainId: dom, level: lv };
 }
+
+// ──────────────────────────────────────────────
+// AI 프롬프트 생성 (B 톤: ESDM 구조·기법 차용, 의성어는 놀이 주제만)
+// claude-relay Edge Function에 { prompt } 로 보낸다.
+// 앱은 주제·기능·수준만 넘기고, 말투 규칙은 이 프롬프트가 강제한다.
+// ──────────────────────────────────────────────
+const AI_LEVEL_DESC = {
+  early: '초기 단계 — 대부분 어른의 도움이 필요하고, 스스로 하는 부분이 아주 적음. 손을 받쳐 함께 하는 촉구, 참여 자체를 목표로.',
+  mid: '중간 단계 — 일부는 스스로 함. 도움을 조금씩 줄이고, 시범 뒤 몇 초 기다려 스스로 할 기회를 줌.',
+  high: '상위 단계 — 거의 혼자 함. 말로만 하는 촉구, 스스로 하도록 기다리고, 도움을 최소로.',
+};
+
+function buildGuidePrompt({ topic, fn, childName, otherDetail, domainId, level }) {
+  const lv = level || 'mid';
+  const lvDesc = AI_LEVEL_DESC[lv] || AI_LEVEL_DESC.mid;
+  const domObj = DOMAINS.find((d) => d.id === (domainId || 'social'));
+  const domLabel = domObj ? domObj.label : '사회성·상호작용';
+  const isPlayDomain = (domainId === 'social' || domainId === 'language');
+  const nm = (childName && childName.trim()) ? childName.trim() : '';
+  const childLine = nm
+    ? `- 아동 이름: "${nm}" — 가이드 본문의 "아이" 자리에 이 이름을 자연스럽게 넣되, 받침에 맞는 조사를 쓴다(민준→민준이가, 서아→서아가).`
+    : `- 아동 이름: 없음 — 본문에서 "아이"로 지칭한다.`;
+  const otherLine = (fn.id === 'other' && otherDetail && otherDetail.trim())
+    ? `\n- 어머님/치료사가 관찰한 상황: ${otherDetail.trim()} — 이 상황을 예상 기능 살펴보기와 실천법에 반드시 반영한다.`
+    : '';
+
+  return `당신은 ABA(응용행동분석) 기반으로 부모를 코칭하는 임상 치료사입니다. 아래 조건으로, 어머님이 집에서 아이와 진행할 "가정 연계 5분 가이드"를 한국어로 작성하세요.
+
+[조건]
+${childLine}
+- 오늘의 주제: ${topic}
+${fn.id === 'skill'
+  ? '- 성격: 문제행동이 아니라 "새로운 기술·활동 배우기"다. 행동 기능(회피·관심끌기 등)을 분석하지 말고, 이 기술을 어떤 순서로 나눠 가르칠지에 집중한다.'
+  : `- 예상 행동 기능: ${fn.label} (${fn.desc})`}
+- 연습 영역: ${domLabel}
+- 아동 수준: ${lvDesc}${otherLine}
+
+[말투 — 아래를 반드시 지킨다]
+1. 어머님이 그대로 따라 할 수 있게 쓴다. 실천법의 각 단계는 [어머님이 하는 말/행동] 과 [→ 그 행동의 임상 의도]가 짝을 이룬다.
+   예) 칫솔을 아이 손에 함께 쥐고 "쓱, 한 번만~" 하며 입에 대보는 딱 한 동작만 같이 합니다.
+       → 손을 받쳐 함께 움직이는 촉구입니다. 나머지는 어머님이 닦아주셔도 됩니다.
+2. [임상 의도]에는 구체적 기법을 자연스러운 우리말로 녹인다: "3초 기다리기", "손을 받쳐 함께 하는 촉구", "말로만 하는 촉구", "즉시 반응", "과장된 표정", "차례 넘기기", "도움을 조금씩 줄이기" 등. 전문용어를 나열하지 말고 풀어서 쓴다.
+3. 호칭은 반드시 "어머님". "부모님" 금지.
+4. 격식체·AI 말투("~할 수 있습니다", "~하는 것이 좋습니다")를 피하고, 현장 치료사가 어머님에게 시연하듯 담백하게 쓴다.
+5. 응원 멘트("화이팅", "잘하고 계세요"), 감성·시적 표현("~하는 그 순간"), 이모지, 느낌표 남발, 강조부사("정말", "꼭", "반드시") 금지.
+6. 없는 일을 지어내지 않는다. 그날 센터에서 있었던 구체적 장면을 상상해 쓰지 않는다. 도입부는 일반적인 한 문장이면 충분하다.
+${isPlayDomain
+  ? '7. 이 주제는 놀이·상호작용 영역이므로, 어머님 대사에 아이가 즐거워할 의성어·감탄을 자연스럽게 넣어도 좋다("데굴데굴~", "우와!"). 단, 억지로 넣지 않는다.'
+  : '7. 이 주제는 일상·행동 지도 영역이므로 놀이 의성어를 억지로 넣지 않는다. 꼭 필요한 곳에만 자연스러운 소리("쓱쓱" 정도)를 쓴다.'}
+
+[수준 반영 — 아동 수준(${lv})에 맞게]
+- 초기: 손을 받쳐 함께 하는 촉구, 참여·거부 없음 자체를 목표로. 기다림보다 성공 경험이 먼저.
+- 중간: 시범을 보이고 3초쯤 기다려 스스로 할 기회를 줌. 도움을 조금씩 줄임.
+- 상위: 말로만 촉구하고 스스로 하도록 충분히 기다림. 도움을 최소로.
+
+[출력 형식 — 반드시 아래 JSON만 출력. 마크다운·설명·코드펜스 금지]
+{
+  "intro": "어머님께 보내는 짧은 인사 한 문장. 이번 주 주제를 집에서 5분 함께 해보자는 정도.",
+  "function_analysis": "${fn.id === 'skill' ? '이 기술을 왜 단계로 나눠 가르치면 좋은지, 아이가 어느 단계부터 시작하면 좋을지 2~3문장.' : '예상 기능을 어떻게 해석하는지 2~3문장. 행동을 탓하지 않고, 대체 방법을 같이 알려주는 방향으로.'}",
+  "goal": "이번 주 목표. 측정 가능하게(예: 5번 중 2~3번). 아동 수준에 맞게.",
+  "materials": "집에서 바로 준비할 수 있는 준비물. 1~2가지.",
+  "practice": "5분 실천법. 1단계(1분)/2단계(2분)/3단계(2분). 각 단계는 [어머님 말·행동] 다음 줄에 [→ 임상 의도]. 단계 사이는 빈 줄로 구분.",
+  "waiting": "어머님이 개입을 줄이고 기다려야 할 순간. 아동 수준에 맞게(초기는 짧게, 상위는 충분히).",
+  "reinforcement": "언제·어떻게 칭찬할지. [~하면 → ~해주세요] 형식. 2~3개. 수준에 맞게.",
+  "weekly_focus": "이번 주 집중해서 셀 한 가지 행동. 한 문장.",
+  "next_priority": "이번 주 결과에 따라 다음 주에 어디로 갈지. 잘되면 확장, 어려우면 되돌림."
+}
+
+practice의 각 단계는 "1단계 (1분) — [어머님 말·행동]\\n→ [임상 의도]" 형식으로 쓰고, 단계 사이는 "\\n\\n"으로 나눈다. JSON만 출력한다.`;
+}
+
 
 function extractJSON(text) {
   if (!text) return null;
@@ -1296,25 +1418,6 @@ function safeRemoveLS(key) {
     localStorage.removeItem(key);
   } catch (e) {}
 }
-// 로그인 세션 전용: sessionStorage 사용 (브라우저 닫으면 자동 로그아웃)
-function sessGet(key) {
-  try {
-    if (typeof sessionStorage === 'undefined') return null;
-    return sessionStorage.getItem(key);
-  } catch (e) { return null; }
-}
-function sessSet(key, value) {
-  try {
-    if (typeof sessionStorage === 'undefined') return;
-    sessionStorage.setItem(key, value);
-  } catch (e) {}
-}
-function sessRemove(key) {
-  try {
-    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key);
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
-  } catch (e) {}
-}
 
 // admin 기본 계정이 DB에 없으면 생성 (Supabase 모드)
 async function ensureAdminDB() {
@@ -1390,7 +1493,7 @@ async function authenticate(id, password) {
     const ok = await verifyPassword(password, user.pw_salt, user.pw_hash);
     if (!ok) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
     const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
-    sessSet(STORAGE_KEY_SESSION, JSON.stringify(session));
+    safeSetLS(STORAGE_KEY_SESSION, JSON.stringify(session));
     return { ok: true, user: session };
   }
 
@@ -1400,13 +1503,13 @@ async function authenticate(id, password) {
   if (!user) return { ok: false, error: '존재하지 않는 아이디입니다' };
   if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
   const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
-  sessSet(STORAGE_KEY_SESSION, JSON.stringify(session));
+  safeSetLS(STORAGE_KEY_SESSION, JSON.stringify(session));
   return { ok: true, user: session };
 }
 
 // 현재 세션 가져오기 (세션 자체는 기기 로컬에 보관 — 로그인 상태 유지용)
 async function loadSession() {
-  const raw = sessGet(STORAGE_KEY_SESSION);
+  const raw = safeGetLS(STORAGE_KEY_SESSION);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw);
@@ -1415,7 +1518,7 @@ async function loadSession() {
     if (supabaseConfigured()) {
       try {
         const u = await dbGetUser(session.id);
-        if (!u || u.is_active === false) { sessRemove(STORAGE_KEY_SESSION); return null; }
+        if (!u || u.is_active === false) { safeRemoveLS(STORAGE_KEY_SESSION); return null; }
       } catch (e) {
         // 서버 확인 실패 시 일단 세션 유지 (오프라인 대비)
         return session;
@@ -1424,7 +1527,7 @@ async function loadSession() {
     }
     const users = await loadUsers();
     const stillExists = users.find(u => u.id === session.id);
-    if (!stillExists) { sessRemove(STORAGE_KEY_SESSION); return null; }
+    if (!stillExists) { safeRemoveLS(STORAGE_KEY_SESSION); return null; }
     return session;
   } catch (e) {
     return null;
@@ -1432,7 +1535,7 @@ async function loadSession() {
 }
 
 function logout() {
-  sessRemove(STORAGE_KEY_SESSION);
+  safeRemoveLS(STORAGE_KEY_SESSION);
 }
 
 // 선생님 계정 추가
@@ -2556,7 +2659,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await refreshCustomTemplates();
-      try { sessRemove(STORAGE_KEY_SESSION); } catch (e) {}
+      try { safeRemoveLS(STORAGE_KEY_SESSION); } catch (e) {}
     })();
   }, []);
 
@@ -2706,23 +2809,35 @@ export default function App() {
       if (endpoint) {
         // AI 먼저 시도. 실패하면 조용히 템플릿으로 넘어간다.
         try {
-          let userMessage = `오늘의 주제: ${t}\n행동 기능(function): ${fn.label} - ${fn.desc}`;
-          if (childName.trim()) userMessage += `\n아동 이름: ${childName.trim()}`;
-          if (fn.id === 'other' && otherDetail.trim()) userMessage += `\n어머님/치료사가 관찰한 상황: ${otherDetail.trim()}`;
+          // B 톤 프롬프트를 완성해 claude-relay(Edge Function)로 보낸다.
+          const prompt = buildGuidePrompt({
+            topic: t, fn,
+            childName: childName.trim(),
+            otherDetail: otherDetail.trim(),
+            domainId: domId,
+            level: selectedLevel,
+          });
 
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 30000);
           const response = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ topic: t, message: userMessage }),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${AI_RELAY_KEY}`,
+            },
+            body: JSON.stringify({ prompt, max_tokens: 3500 }),
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
 
           if (response.ok) {
             const data = await response.json();
-            const text = (data && (data.text || (Array.isArray(data.content) ? data.content.map(b => b.text || '').join('') : ''))) || '';
+            // claude-relay는 Anthropic 원본 응답을 그대로 돌려준다: { content: [{type:'text', text:'...'}] }
+            const text = (data && (
+              (Array.isArray(data.content) ? data.content.map(b => b.text || '').join('') : '') ||
+              data.text || ''
+            )) || '';
             const aiParsed = extractJSON(text);
             if (aiParsed) {
               // AI가 채운 필드는 AI 것, 빠진 필드는 템플릿으로 보강
