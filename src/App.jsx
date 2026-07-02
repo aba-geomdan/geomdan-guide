@@ -2625,6 +2625,7 @@ const tplStyles = {
 export default function App() {
   // ── 인증 state ──
   const [session, setSession] = useState(null); // { id, name, role }
+  const [booting, setBooting] = useState(true); // 세션 복원 완료 전까지 true
   const [showAdminPage, setShowAdminPage] = useState(false);
   const [viewingTeacherId, setViewingTeacherId] = useState(null); // 관리자가 특정 선생님 보관함 조회 중
 
@@ -2662,6 +2663,7 @@ export default function App() {
         const restored = await loadSession();
         if (restored) setSession(restored);
       } catch (e) {}
+      setBooting(false);
     })();
   }, []);
 
@@ -3522,6 +3524,25 @@ export default function App() {
     setSelectedFunction(null);
     setOtherDetail('');
   };
+
+  // 세션 복원 중에는 로그인 화면 깜빡임 방지용 로딩 화면
+  if (booting) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 16,
+        background: '#fdf5f5',
+      }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%',
+          border: '4px solid #f4d4dc', borderTopColor: '#e07187',
+          animation: 'gdSpin 0.8s linear infinite',
+        }} />
+        <div style={{ color: '#8a6571', fontSize: 14 }}>불러오는 중…</div>
+        <style>{`@keyframes gdSpin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   // 로그인 안 됐으면 로그인 화면만 보여줌
   if (!session) {
