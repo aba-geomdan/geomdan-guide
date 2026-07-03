@@ -1274,7 +1274,7 @@ function buildGuidePrompt({ topic, fn, childName, otherDetail, domainId, level }
   const isPlayDomain = (domainId === 'social' || domainId === 'language');
   const nm = (childName && childName.trim()) ? childName.trim() : '';
   const childLine = nm
-    ? `- 아동 이름: "${nm}" — 가이드 본문의 "아이" 자리에 이 이름을 자연스럽게 넣되, 받침에 맞는 조사를 쓴다(민준→민준이가, 서아→서아가).`
+    ? `- 아동 이름: "${nm}" — 가이드 본문의 "아이" 자리에 이 이름을 자연스럽게 넣되, 받침에 맞는 조사를 쓴다(민준→민준이가, 서아→서아가). 만약 성이 붙은 세 글자 이름(예: "김민준", "이서아")이 들어오면, 성을 빼고 이름만 쓴다(김민준→민준이가, 이서아→서아가).`
     : `- 아동 이름: 없음 — 본문에서 "아이"로 지칭한다.`;
   const otherLine = (fn.id === 'other' && otherDetail && otherDetail.trim())
     ? `\n- 어머님/치료사가 관찰한 상황: ${otherDetail.trim()} — 이 상황을 예상 기능 살펴보기와 실천법에 반드시 반영한다.`
@@ -1297,7 +1297,7 @@ ${fn.id === 'skill'
        → 손을 받쳐 함께 움직이는 촉구입니다. 나머지는 어머님이 닦아주셔도 됩니다.
 2. [임상 의도]에는 구체적 기법을 자연스러운 우리말로 녹인다: "3초 기다리기", "손을 받쳐 함께 하는 촉구", "말로만 하는 촉구", "즉시 반응", "과장된 표정", "차례 넘기기", "도움을 조금씩 줄이기" 등. 전문용어를 나열하지 말고 풀어서 쓴다.
 3. 호칭은 반드시 "어머님". "부모님" 금지.
-4. 격식체·AI 말투("~할 수 있습니다", "~하는 것이 좋습니다")를 피하고, 현장 치료사가 어머님에게 시연하듯 담백하게 쓴다.
+4. 장황한 AI 말투("~할 수 있습니다", "~하는 것이 좋습니다", "~하시기 바랍니다")를 피하고, 현장 치료사가 어머님에게 시연하듯 담백하게 쓴다. 단, 어머님께 안내하는 문장(목표·설명 등)은 담백한 존댓말("~합니다", "~해 주세요")로 끝내는 게 자연스럽다. "~완료한다", "~참여한다" 같은 딱딱한 서술체(음슴체)로 끝내지 않는다.
 5. 응원 멘트("화이팅", "잘하고 계세요"), 감성·시적 표현("~하는 그 순간"), 이모지, 느낌표 남발, 강조부사("정말", "꼭", "반드시") 금지.
 6. 없는 일을 지어내지 않는다. 그날 센터에서 있었던 구체적 장면을 상상해 쓰지 않고, 실제로 나지 않는 소리·동작도 지어내지 않는다. 도입부는 일반적인 한 문장이면 충분하다.
 ${isPlayDomain
@@ -1322,7 +1322,7 @@ G. 강화(칭찬)는 사회적 강화를 우선한다. 어머님의 즉각적인
 {
   "intro": "어머님께 보내는 짧은 인사 한 문장. 이번 주 주제를 집에서 5분 함께 해보자는 정도.",
   "function_analysis": "${fn.id === 'skill' ? '이 기술을 왜 단계로 나눠 가르치면 좋은지, 아이가 어느 단계부터 시작하면 좋을지 2~3문장.' : '예상 기능을 어떻게 해석하는지 2~3문장. 행동을 탓하지 않고, 대체 방법을 같이 알려주는 방향으로.'}",
-  "goal": "이번 주 목표. 반드시 셀 수 있게: (성공 횟수/전체 기회) 또는 (지속 시간) 형태로만(예: 5번 중 2~3번, 5초 이상 유지). '잘 참여한다' 같은 표현 금지. 아동 수준에 맞게.",
+  "goal": "이번 주 목표. 반드시 셀 수 있게: (성공 횟수/전체 기회) 또는 (지속 시간) 형태로만(예: 5번 중 2~3번, 5초 이상 유지). '잘 참여한다' 같은 표현 금지. 아동 수준에 맞게. 문장은 '~완료한다', '~참여한다'처럼 딱딱하게 끝내지 말고, '5번 중 3번은 완료하는 것을 목표로 합니다'처럼 어머님께 안내하는 부드러운 존댓말로 끝낸다.",
   "materials": "집에서 바로 준비할 수 있는 준비물. 1~2가지.",
   "practice": "5분 실천법. 1단계(1분)/2단계(2분)/3단계(2분). 각 단계는 [어머님 말·행동] 다음 줄에 [→ 임상 의도]. 단계 사이는 빈 줄로 구분.",
   "waiting": "어머님이 개입을 줄이고, 아이가 스스로 할 기회를 주려고 몇 초 기다리는 순간. '무시하기'가 아니라 '기다려 주기'로 쓴다. 아동 수준에 맞게(초기는 짧게, 상위는 충분히).",
@@ -3166,6 +3166,16 @@ export default function App() {
   }
   .guide-row-item .content-cell p { margin: 0 0 8px 0; }
   .guide-row-item .content-cell p:last-child { margin: 0; }
+  /* 5분 실천법처럼 긴 행은 페이지에 걸쳐 이어지게 하되(1p 하단 공백 방지),
+     각 단계 문단은 페이지 중간에서 잘리지 않게 한다. */
+  .guide-row-item.allow-break {
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  .guide-row-item.allow-break .content-cell p {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
   .check-section {
     background: #fef7f9;
     border: 1px solid #f4d4dc;
@@ -3282,7 +3292,7 @@ export default function App() {
       <div class="label-cell">준비물</div>
       <div class="content-cell">${formatMultiline(guide.materials)}</div>
     </div>
-    <div class="guide-row-item">
+    <div class="guide-row-item allow-break">
       <div class="label-cell">5분 실천법</div>
       <div class="content-cell">${formatMultiline(guide.practice)}</div>
     </div>
@@ -3768,13 +3778,13 @@ export default function App() {
         <div style={styles.stepLabel}>
           <span style={styles.stepNum}>1</span>
           <span>아동 이름</span>
-          <span style={styles.stepHint}>(선택 입력 - 비워두면 "아이"로 표기됩니다)</span>
+          <span style={styles.stepHint}>(성 빼고 이름만 · 비워두면 "아이"로 표기됩니다)</span>
         </div>
         <input
           type="text"
           value={childName}
           onChange={(e) => setChildName(e.target.value)}
-          placeholder="예: 민준, 서연"
+          placeholder="예: 다솔, 서연 (성 없이 이름만)"
           style={{ ...styles.input, width: '100%', marginBottom: '20px' }}
           disabled={loading}
         />
