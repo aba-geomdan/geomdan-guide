@@ -1299,10 +1299,19 @@ ${fn.id === 'skill'
 3. 호칭은 반드시 "어머님". "부모님" 금지.
 4. 격식체·AI 말투("~할 수 있습니다", "~하는 것이 좋습니다")를 피하고, 현장 치료사가 어머님에게 시연하듯 담백하게 쓴다.
 5. 응원 멘트("화이팅", "잘하고 계세요"), 감성·시적 표현("~하는 그 순간"), 이모지, 느낌표 남발, 강조부사("정말", "꼭", "반드시") 금지.
-6. 없는 일을 지어내지 않는다. 그날 센터에서 있었던 구체적 장면을 상상해 쓰지 않는다. 도입부는 일반적인 한 문장이면 충분하다.
+6. 없는 일을 지어내지 않는다. 그날 센터에서 있었던 구체적 장면을 상상해 쓰지 않고, 실제로 나지 않는 소리·동작도 지어내지 않는다. 도입부는 일반적인 한 문장이면 충분하다.
 ${isPlayDomain
-  ? '7. 이 주제는 놀이·상호작용 영역이므로, 어머님 대사에 아이가 즐거워할 의성어·감탄을 자연스럽게 넣어도 좋다("데굴데굴~", "우와!"). 단, 억지로 넣지 않는다.'
-  : '7. 이 주제는 일상·행동 지도 영역이므로 놀이 의성어를 억지로 넣지 않는다. 꼭 필요한 곳에만 자연스러운 소리("쓱쓱" 정도)를 쓴다.'}
+  ? '7. 이 주제는 놀이·상호작용 영역이다. 어머님 대사에 의성어·감탄을 넣을 때는, 그 동작에서 실제로 나는 소리만 쓴다("데굴데굴", "우와"). 억지로 넣지 않는다.\n8. 의성어는 반드시 그 동작의 실제 소리와 맞아야 한다. 동작에 안 맞는 소리를 지어내지 않는다. (예: 가위질=싹둑/쓱-싹이지 "찰칵"이 아님. "찰칵"은 카메라·버튼 소리다.) 맞는 소리가 떠오르지 않으면 의성어를 아예 넣지 말고 "한 번만~", "여기까지~" 처럼 짧은 말로 대체한다.'
+  : '7. 이 주제는 일상·행동·기술 지도 영역이다. 의성어는 기본적으로 넣지 않는다. 어머님 대사는 "한 번만~", "여기까지~", "다 됐다" 같은 짧은 말로 쓰는 것을 기본으로 한다.\n8. 굳이 소리를 넣어야 한다면, 그 동작에서 실제로 나는 소리만 쓴다. 동작에 안 맞는 소리를 지어내지 않는다. (예: 가위질=싹둑/쓱-싹이지 "찰칵"이 아님. "찰칵"은 카메라·버튼 소리다. 칫솔질=쓱쓱, 지퍼=지익.) 맞는 소리가 떠오르지 않으면 의성어를 아예 빼고 짧은 말로만 쓴다.'}
+
+[내용 — 반드시 지킨다]
+A. 목표(goal)는 반드시 셀 수 있게 쓴다. "5번 중 2~3번", "5초 이상 유지", "3번의 기회 중 2번" 처럼 (성공 횟수/전체 기회) 또는 (지속 시간) 형태로만 쓴다. "잘 참여한다", "즐거워한다", "익숙해진다" 같이 셀 수 없는 목표는 금지한다.
+B. 가정에서 어머님이 하는 절차는 촉구(도움 주기)·강화(칭찬)·환경 조절(준비물·자리 배치)까지만 쓴다. 소거(울거나 떼써도 반응하지 않고 무시하기), 벌·제지·타임아웃, 강한 신체 개입은 어머님 대사·실천법에 절대 넣지 않는다. 그런 절차는 센터에서 치료사가 다룬다고 전제한다. waiting(기다림)은 "무시"가 아니라 "스스로 할 기회를 주려고 몇 초 기다리는 것"으로만 쓴다.
+C. 안전을 전제로 쓴다. 모든 활동은 어머님이 곁에서 지켜보는 상황을 기본으로 한다. 위험 가능성이 있는 준비물(가위·젓가락·작은 부품·삼킬 수 있는 것·뜨거운 것 등)은 안전한 형태(어린이용 안전가위, 큰 부품 등)로 안내하고, 필요하면 실천법에 "어머님이 손을 받쳐 함께" 또는 "지켜보며"를 넣는다.
+D. 단정·진단·예언을 하지 않는다. 예상 기능은 "~로 보입니다", "~일 수 있습니다" 수준으로만 쓰고, "이 아이는 회피가 강합니다" 같은 확정, 발달 예후·좋아질/나빠질 것이라는 예측은 쓰지 않는다.
+E. 5분·3단계 구조를 벗어나지 않는다. 하루에 한 번, 5분, 3단계(1분/2분/2분) 범위 안에서만 쓴다. "하루 여러 번", "매 끼니마다", "온종일" 처럼 분량을 늘리지 않는다.
+F. 다른 치료·시술·약물을 언급하지 않는다. 감각통합·약물·특정 치료법·병원 등을 권하거나 평가하지 않는다. 이 자료는 가정에서 하는 ABA 연습만 다룬다.
+G. 강화(칭찬)는 사회적 강화를 우선한다. 어머님의 즉각적인 말·과장된 표정·하이파이브·좋아하는 짧은 놀이를 기본으로 쓴다. 먹을 것(사탕·과자 등)이나 영상·스마트폰을 강화물로 쓰라고 권하지 않는다. 결과물이 남는 활동이면 그 결과물(잘린 종이 조각 등)을 아이 손에 쥐여 주는 것을 강화로 활용한다.
 
 [수준 반영 — 아동 수준(${lv})에 맞게]
 - 초기: 손을 받쳐 함께 하는 촉구, 참여·거부 없음 자체를 목표로. 기다림보다 성공 경험이 먼저.
@@ -1313,11 +1322,11 @@ ${isPlayDomain
 {
   "intro": "어머님께 보내는 짧은 인사 한 문장. 이번 주 주제를 집에서 5분 함께 해보자는 정도.",
   "function_analysis": "${fn.id === 'skill' ? '이 기술을 왜 단계로 나눠 가르치면 좋은지, 아이가 어느 단계부터 시작하면 좋을지 2~3문장.' : '예상 기능을 어떻게 해석하는지 2~3문장. 행동을 탓하지 않고, 대체 방법을 같이 알려주는 방향으로.'}",
-  "goal": "이번 주 목표. 측정 가능하게(예: 5번 중 2~3번). 아동 수준에 맞게.",
+  "goal": "이번 주 목표. 반드시 셀 수 있게: (성공 횟수/전체 기회) 또는 (지속 시간) 형태로만(예: 5번 중 2~3번, 5초 이상 유지). '잘 참여한다' 같은 표현 금지. 아동 수준에 맞게.",
   "materials": "집에서 바로 준비할 수 있는 준비물. 1~2가지.",
   "practice": "5분 실천법. 1단계(1분)/2단계(2분)/3단계(2분). 각 단계는 [어머님 말·행동] 다음 줄에 [→ 임상 의도]. 단계 사이는 빈 줄로 구분.",
-  "waiting": "어머님이 개입을 줄이고 기다려야 할 순간. 아동 수준에 맞게(초기는 짧게, 상위는 충분히).",
-  "reinforcement": "언제·어떻게 칭찬할지. [~하면 → ~해주세요] 형식. 2~3개. 수준에 맞게.",
+  "waiting": "어머님이 개입을 줄이고, 아이가 스스로 할 기회를 주려고 몇 초 기다리는 순간. '무시하기'가 아니라 '기다려 주기'로 쓴다. 아동 수준에 맞게(초기는 짧게, 상위는 충분히).",
+  "reinforcement": "언제·어떻게 칭찬할지. [~하면 → ~해주세요] 형식. 2~3개. 사회적 강화(말·표정·하이파이브·짧은 놀이) 위주로. 먹을 것·영상 권하지 않기. 수준에 맞게.",
   "weekly_focus": "이번 주 집중해서 셀 한 가지 행동. 한 문장.",
   "next_priority": "이번 주 결과에 따라 다음 주에 어디로 갈지. 잘되면 확장, 어려우면 되돌림."
 }
@@ -2823,14 +2832,14 @@ export default function App() {
           });
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 30000);
+          const timeoutId = setTimeout(() => controller.abort(), 55000);
           const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${AI_RELAY_KEY}`,
             },
-            body: JSON.stringify({ prompt, max_tokens: 3500 }),
+            body: JSON.stringify({ prompt, max_tokens: 2200 }),
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
@@ -2920,7 +2929,6 @@ export default function App() {
       `[${titlePrefix}집에서 하는 5분 ABA 가이드]`, ``,
       g.intro, ``,
       `■ 오늘의 주제: ${g.topic}`,
-      `■ 예상 행동 기능: ${g.functionInfo?.label} (${g.functionInfo?.desc})`,
     ];
     if (g.otherDetail) {
       lines.push(`■ 관찰된 상황: ${g.otherDetail}`);
@@ -3001,24 +3009,8 @@ export default function App() {
       ? `<div class="other-detail"><strong>관찰된 상황</strong> ${escapeHtml(guide.otherDetail)}</div>`
       : '';
 
-    // functionInfo가 없는 옛 데이터를 위한 안전한 기본값
+    // functionInfo가 없는 옛 데이터를 위한 안전한 기본값 (아래 CSS 색상에서 사용)
     const fnInfo = guide.functionInfo || { label: '미지정', desc: '', color: '#e07187', id: 'none' };
-    const fnBoxBlock = guide.functionInfo
-      ? `<div class="fn-box">
-          <span class="fn-label">예상 기능</span>
-          <span class="fn-value">${escapeHtml(fnInfo.label)}</span>
-        </div>`
-      : '';
-
-    const LEVEL_LABEL_MAP = { early: '초기', mid: '중간', high: '상위' };
-    const lvLabel = LEVEL_LABEL_MAP[guide.level] || '';
-    const lvHint = ((LEVEL_HINTS[guide.domainId] || {})[guide.level]) || '';
-    const levelBoxBlock = lvLabel
-      ? `<div class="fn-box">
-          <span class="fn-label">아동 수준</span>
-          <span class="fn-value">${escapeHtml(lvLabel)}${lvHint ? ' · ' + escapeHtml(lvHint) : ''}</span>
-        </div>`
-      : '';
 
     const html = `<!DOCTYPE html>
 <html lang="ko">
@@ -3273,8 +3265,6 @@ export default function App() {
       <span class="topic-label">오늘의 주제</span>
       <span class="topic-value">${escapeHtml(guide.topic)}</span>
     </div>
-    ${fnBoxBlock}
-    ${levelBoxBlock}
   </div>
 
   ${otherDetailBlock}
@@ -4432,14 +4422,6 @@ export default function App() {
                   <span style={styles.todayValue}>{guide.topic}</span>
                 )}
               </div>
-              {guide.functionInfo && (
-                <div style={{ ...styles.fnTag, background: `${guide.functionInfo.color}20`, borderColor: guide.functionInfo.color }}>
-                  <span style={styles.fnTagLabel}>예상 기능</span>
-                  <span style={{ ...styles.fnTagValue, color: guide.functionInfo.color }}>
-                    {guide.functionInfo.label}
-                  </span>
-                </div>
-              )}
             </div>
 
             {guide.otherDetail && !isEditing && (
