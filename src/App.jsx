@@ -3778,7 +3778,7 @@ export default function App() {
         <div style={styles.stepLabel}>
           <span style={styles.stepNum}>1</span>
           <span>아동 이름</span>
-          <span style={styles.stepHint}>(성 빼고 이름만 · 비워두면 "아이"로 표기됩니다)</span>
+          <span style={styles.stepHint}>(성 빼고 이름만 쓰세요 · 비워두면 "아이"로 표기됩니다)</span>
         </div>
         <input
           type="text"
@@ -4160,7 +4160,7 @@ export default function App() {
                     <div style={styles.manualStepBody}>
                       <div style={styles.manualStepTitle}>아동 이름 입력 (선택)</div>
                       <div style={styles.manualStepText}>
-                        비워두시면 가이드 전체에서 "아이"로 표기됩니다. 받침이 있으면 자동으로 "이"가 붙고("민준" → "민준이"), 받침이 없으면 그대로 나옵니다("다혜" → "다혜").
+                        성은 빼고 이름만 입력해 주세요("민다솔" 대신 "다솔"). 비워두시면 가이드 전체에서 "아이"로 표기됩니다. 받침이 있으면 자동으로 "이"가 붙고("민준" → "민준이"), 받침이 없으면 그대로 나옵니다("다혜" → "다혜").
                       </div>
                     </div>
                   </div>
