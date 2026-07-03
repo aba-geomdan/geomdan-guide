@@ -2656,6 +2656,8 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0);
   const [confirmAction, setConfirmAction] = useState(null); // { message, onConfirm }
   const [historyFilter, setHistoryFilter] = useState(''); // 아동 이름 필터
+  const [ownerNameMap, setOwnerNameMap] = useState({}); // 통합 조회 시 선생님 id→이름
+  const [collapsedOwners, setCollapsedOwners] = useState({}); // 통합 조회 시 접힌 선생님 폴더
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(null);
   const [checkTable, setCheckTable] = useState(
@@ -2705,6 +2707,15 @@ export default function App() {
             createdAt: r.payload?.createdAt || r.created_at,
           }));
           if (!cancelled) setHistory(guides);
+          // 통합 조회일 때는 선생님 이름(id→name) 맵도 준비
+          if (dataUserId === '__ALL__') {
+            try {
+              const users = await dbListUsers();
+              const map = {};
+              (users || []).forEach(u => { map[u.id] = u.name || u.id; });
+              if (!cancelled) setOwnerNameMap(map);
+            } catch (e) { /* 이름 못 불러와도 id로 표시 */ }
+          }
         } catch (e) { if (!cancelled) setHistory([]); }
       })();
       return () => { cancelled = true; };
@@ -2902,9 +2913,9 @@ export default function App() {
           }
         } catch (e) { /* 저장 실패해도 화면 표시는 유지 */ }
         setGuide({ ...result });
-        setHistory([result, ...history.filter(h => h.guide_id !== result.guide_id)].slice(0, 50));
+        setHistory([result, ...history.filter(h => h.guide_id !== result.guide_id)].slice(0, 300));
       } else {
-        const nextHistory = [result, ...history.filter(h => h.topic !== t || h.functionInfo?.id !== fn.id)].slice(0, 30);
+        const nextHistory = [result, ...history.filter(h => h.topic !== t || h.functionInfo?.id !== fn.id)].slice(0, 100);
         saveHistory(nextHistory);
       }
 
@@ -4010,110 +4021,152 @@ export default function App() {
                   주제를 입력하고 가이드를 만들어 보세요.
                 </div>
               ) : (() => {
-                // 아동별로 그룹핑
-                const groups = {};
-                history.forEach(h => {
-                  const key = h.childName?.trim() || '__none__';
-                  if (!groups[key]) groups[key] = [];
-                  groups[key].push(h);
-                });
-                const childNames = Object.keys(groups).sort((a, b) => {
-                  if (a === '__none__') return 1;
-                  if (b === '__none__') return -1;
-                  return a.localeCompare(b, 'ko');
-                });
+                const isAllView = viewingTeacherId === '__ALL__';
 
-                // 필터에 해당하는 그룹이 사라졌으면 전체 표시 (이중 안전장치)
-                const filterActive = historyFilter && groups[historyFilter]?.length > 0;
-                const filtered = filterActive
-                  ? { [historyFilter]: groups[historyFilter] }
-                  : groups;
-                const filteredKeys = filterActive ? [historyFilter] : childNames;
+                // 주어진 항목들을 아동별로 그룹핑해서 렌더하는 헬퍼
+                const renderChildGroups = (items, keyPrefix) => {
+                  const groups = {};
+                  items.forEach(h => {
+                    const key = h.childName?.trim() || '__none__';
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(h);
+                  });
+                  const childNames = Object.keys(groups).sort((a, b) => {
+                    if (a === '__none__') return 1;
+                    if (b === '__none__') return -1;
+                    return a.localeCompare(b, 'ko');
+                  });
+                  // 필터는 통합 뷰가 아닐 때만 적용(선생님 폴더 안에서는 필터 미적용)
+                  const useFilter = !isAllView;
+                  const filterActive = useFilter && historyFilter && groups[historyFilter]?.length > 0;
+                  const filtered = filterActive ? { [historyFilter]: groups[historyFilter] } : groups;
+                  const filteredKeys = filterActive ? [historyFilter] : childNames;
 
-                return (
-                  <>
-                    {/* 아동 이름 필터 칩 */}
-                    {childNames.length > 1 && (
-                      <div style={styles.filterBar}>
-                        <button
-                          onClick={() => setHistoryFilter('')}
-                          style={{
-                            ...styles.filterChip,
-                            background: !filterActive ? COLORS.primary : '#fff',
-                            color: !filterActive ? '#fff' : COLORS.text,
-                            borderColor: !filterActive ? COLORS.primary : COLORS.border,
-                            fontWeight: !filterActive ? 700 : 500,
-                          }}
-                        >
-                          전체 ({history.length})
-                        </button>
-                        {childNames.map(name => {
-                          const isActive = filterActive && historyFilter === name;
-                          const display = name === '__none__' ? '이름 미입력' : nameWithSuffix(name);
-                          return (
-                            <button
-                              key={name}
-                              onClick={() => setHistoryFilter(isActive ? '' : name)}
-                              style={{
-                                ...styles.filterChip,
-                                background: isActive ? COLORS.primary : '#fff',
-                                color: isActive ? '#fff' : COLORS.text,
-                                borderColor: isActive ? COLORS.primary : COLORS.border,
-                                fontWeight: isActive ? 700 : 500,
-                              }}
-                            >
-                              {display} ({groups[name].length})
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* 그룹별 목록 */}
-                    {filteredKeys.map(name => (
-                      <div key={name} style={styles.historyGroup}>
-                        <div style={styles.historyGroupHeader}>
-                          {name === '__none__' ? (
-                            <span style={styles.historyGroupNameNone}>이름 미입력</span>
-                          ) : (
-                            <span style={styles.historyGroupName}>{nameWithSuffix(name)}</span>
-                          )}
-                          <span style={styles.historyGroupCount}>{filtered[name].length}개</span>
-                        </div>
-                        <div style={styles.historyList}>
-                          {filtered[name].map((h, i) => (
-                            <div key={h.createdAt || i} style={styles.historyItemWrap}>
-                              <button onClick={() => loadFromHistory(h)} style={styles.historyItem}>
-                                <span style={styles.historyTopic}>
-                                  {h.topic}
-                                  {h.functionInfo && (
-                                    <span style={{ ...styles.historyTag, background: `${h.functionInfo.color}25`, color: h.functionInfo.color }}>
-                                      {h.functionInfo.label}
-                                    </span>
-                                  )}
-                                  {viewingTeacherId === '__ALL__' && h.owner_id && (
-                                    <span style={styles.historyOwnerTag}>
-                                      {h.owner_id}
-                                    </span>
-                                  )}
-                                </span>
-                                <span style={styles.historyDate}>{new Date(h.createdAt).toLocaleDateString('ko-KR')}</span>
-                              </button>
+                  return (
+                    <>
+                      {/* 아동 이름 필터 칩 (내 보관함/개별 선생님 조회에서만) */}
+                      {useFilter && childNames.length > 1 && (
+                        <div style={styles.filterBar}>
+                          <button
+                            onClick={() => setHistoryFilter('')}
+                            style={{
+                              ...styles.filterChip,
+                              background: !filterActive ? COLORS.primary : '#fff',
+                              color: !filterActive ? '#fff' : COLORS.text,
+                              borderColor: !filterActive ? COLORS.primary : COLORS.border,
+                              fontWeight: !filterActive ? 700 : 500,
+                            }}
+                          >
+                            전체 ({items.length})
+                          </button>
+                          {childNames.map(name => {
+                            const isActive = filterActive && historyFilter === name;
+                            const display = name === '__none__' ? '이름 미입력' : nameWithSuffix(name);
+                            return (
                               <button
-                                onClick={() => removeHistoryItem(h)}
-                                style={styles.historyItemRemove}
-                                title="이 가이드 삭제"
-                                aria-label="삭제"
+                                key={name}
+                                onClick={() => setHistoryFilter(isActive ? '' : name)}
+                                style={{
+                                  ...styles.filterChip,
+                                  background: isActive ? COLORS.primary : '#fff',
+                                  color: isActive ? '#fff' : COLORS.text,
+                                  borderColor: isActive ? COLORS.primary : COLORS.border,
+                                  fontWeight: isActive ? 700 : 500,
+                                }}
                               >
-                                ×
+                                {display} ({groups[name].length})
                               </button>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
-                      </div>
-                    ))}
-                  </>
-                );
+                      )}
+
+                      {/* 아동별 목록 */}
+                      {filteredKeys.map(name => (
+                        <div key={`${keyPrefix}-${name}`} style={styles.historyGroup}>
+                          <div style={styles.historyGroupHeader}>
+                            {name === '__none__' ? (
+                              <span style={styles.historyGroupNameNone}>이름 미입력</span>
+                            ) : (
+                              <span style={styles.historyGroupName}>{nameWithSuffix(name)}</span>
+                            )}
+                            <span style={styles.historyGroupCount}>{filtered[name].length}개</span>
+                          </div>
+                          <div style={styles.historyList}>
+                            {filtered[name].map((h, i) => (
+                              <div key={h.createdAt || i} style={styles.historyItemWrap}>
+                                <button onClick={() => loadFromHistory(h)} style={styles.historyItem}>
+                                  <span style={styles.historyTopic}>
+                                    {h.topic}
+                                    {h.functionInfo && (
+                                      <span style={{ ...styles.historyTag, background: `${h.functionInfo.color}25`, color: h.functionInfo.color }}>
+                                        {h.functionInfo.label}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span style={styles.historyDate}>{new Date(h.createdAt).toLocaleDateString('ko-KR')}</span>
+                                </button>
+                                <button
+                                  onClick={() => removeHistoryItem(h)}
+                                  style={styles.historyItemRemove}
+                                  title="이 가이드 삭제"
+                                  aria-label="삭제"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  );
+                };
+
+                // ── 통합 조회(__ALL__): 선생님별 폴더 토글 ──
+                if (isAllView) {
+                  const byOwner = {};
+                  history.forEach(h => {
+                    const oid = h.owner_id || '__unknown__';
+                    if (!byOwner[oid]) byOwner[oid] = [];
+                    byOwner[oid].push(h);
+                  });
+                  const ownerIds = Object.keys(byOwner).sort((a, b) => {
+                    const an = ownerNameMap[a] || a;
+                    const bn = ownerNameMap[b] || b;
+                    return an.localeCompare(bn, 'ko');
+                  });
+
+                  return (
+                    <>
+                      {ownerIds.map(oid => {
+                        const ownerName = ownerNameMap[oid] || (oid === '__unknown__' ? '소유자 미상' : oid);
+                        const isCollapsed = collapsedOwners[oid];
+                        const count = byOwner[oid].length;
+                        return (
+                          <div key={oid} style={styles.ownerFolder}>
+                            <button
+                              onClick={() => setCollapsedOwners(prev => ({ ...prev, [oid]: !prev[oid] }))}
+                              style={styles.ownerFolderHeader}
+                            >
+                              <span style={styles.ownerFolderCaret}>{isCollapsed ? '▶' : '▼'}</span>
+                              <span style={styles.ownerFolderName}>{ownerName} 선생님</span>
+                              <span style={styles.ownerFolderCount}>{count}개</span>
+                            </button>
+                            {!isCollapsed && (
+                              <div style={styles.ownerFolderBody}>
+                                {renderChildGroups(byOwner[oid], oid)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                }
+
+                // ── 내 보관함 / 개별 선생님 조회: 기존 아동별 그룹 ──
+                return renderChildGroups(history, 'my');
               })()}
             </div>
           </div>
@@ -4977,6 +5030,42 @@ const styles = {
   },
   historyGroup: {
     marginBottom: '18px',
+  },
+  ownerFolder: {
+    marginBottom: '14px',
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: '12px',
+    overflow: 'hidden',
+    background: '#fff',
+  },
+  ownerFolderHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    width: '100%',
+    padding: '12px 14px',
+    background: COLORS.accentLight,
+    border: 'none',
+    cursor: 'pointer',
+    textAlign: 'left',
+  },
+  ownerFolderCaret: {
+    fontSize: '11px',
+    color: COLORS.primaryDark,
+  },
+  ownerFolderName: {
+    flex: 1,
+    fontSize: '14px',
+    fontWeight: 700,
+    color: COLORS.primaryDark,
+  },
+  ownerFolderCount: {
+    fontSize: '12px',
+    color: COLORS.textLight,
+    fontWeight: 600,
+  },
+  ownerFolderBody: {
+    padding: '12px 12px 4px',
   },
   historyGroupHeader: {
     display: 'flex',
