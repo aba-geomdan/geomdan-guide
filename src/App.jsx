@@ -2850,7 +2850,7 @@ export default function App() {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${AI_RELAY_KEY}`,
             },
-            body: JSON.stringify({ prompt, max_tokens: 2200 }),
+            body: JSON.stringify({ prompt, max_tokens: 2200, stream: false }),
             signal: controller.signal,
           });
           clearTimeout(timeoutId);
