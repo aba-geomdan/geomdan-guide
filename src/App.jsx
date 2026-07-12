@@ -1428,6 +1428,28 @@ function safeRemoveLS(key) {
   } catch (e) {}
 }
 
+// ── 로그인 세션 전용 (sessionStorage — 브라우저/탭 닫으면 자동 로그아웃) ──
+function safeGetSession(key) {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    return sessionStorage.getItem(key);
+  } catch (e) { return null; }
+}
+function safeSetSession(key, value) {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, value);
+  } catch (e) {}
+}
+function safeRemoveSession(key) {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key);
+  } catch (e) {}
+  // 과거 localStorage에 남아있던 자동로그인 흔적도 제거
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+  } catch (e) {}
+}
+
 // admin 기본 계정이 DB에 없으면 생성 (Supabase 모드)
 async function ensureAdminDB() {
   try {
@@ -1502,7 +1524,7 @@ async function authenticate(id, password) {
     const ok = await verifyPassword(password, user.pw_salt, user.pw_hash);
     if (!ok) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
     const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
-    safeSetLS(STORAGE_KEY_SESSION, JSON.stringify(session));
+    safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(session));
     return { ok: true, user: session };
   }
 
@@ -1512,13 +1534,13 @@ async function authenticate(id, password) {
   if (!user) return { ok: false, error: '존재하지 않는 아이디입니다' };
   if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
   const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
-  safeSetLS(STORAGE_KEY_SESSION, JSON.stringify(session));
+  safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(session));
   return { ok: true, user: session };
 }
 
 // 현재 세션 가져오기 (세션 자체는 기기 로컬에 보관 — 로그인 상태 유지용)
 async function loadSession() {
-  const raw = safeGetLS(STORAGE_KEY_SESSION);
+  const raw = safeGetSession(STORAGE_KEY_SESSION);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw);
@@ -1527,7 +1549,7 @@ async function loadSession() {
     if (supabaseConfigured()) {
       try {
         const u = await dbGetUser(session.id);
-        if (!u || u.is_active === false) { safeRemoveLS(STORAGE_KEY_SESSION); return null; }
+        if (!u || u.is_active === false) { safeRemoveSession(STORAGE_KEY_SESSION); return null; }
       } catch (e) {
         // 서버 확인 실패 시 일단 세션 유지 (오프라인 대비)
         return session;
@@ -1536,7 +1558,7 @@ async function loadSession() {
     }
     const users = await loadUsers();
     const stillExists = users.find(u => u.id === session.id);
-    if (!stillExists) { safeRemoveLS(STORAGE_KEY_SESSION); return null; }
+    if (!stillExists) { safeRemoveSession(STORAGE_KEY_SESSION); return null; }
     return session;
   } catch (e) {
     return null;
@@ -1544,7 +1566,7 @@ async function loadSession() {
 }
 
 function logout() {
-  safeRemoveLS(STORAGE_KEY_SESSION);
+  safeRemoveSession(STORAGE_KEY_SESSION);
 }
 
 // 선생님 계정 추가
@@ -1688,6 +1710,10 @@ function LoginView({ onLogin }) {
           <div style={loginStyles.brandName}>검단ABA언어행동연구소</div>
           <div style={loginStyles.brandSub}>ABA 기반 가정 연계 5분 가이드</div>
         </div>
+
+        {/* 브라우저 자동완성 차단용 미끼 필드 (화면에 보이지 않음) */}
+        <input type="text" name="username" tabIndex={-1} aria-hidden="true" autoComplete="username" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, pointerEvents: 'none', zIndex: -1 }} />
+        <input type="password" name="password" tabIndex={-1} aria-hidden="true" autoComplete="current-password" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, pointerEvents: 'none', zIndex: -1 }} />
 
         <div style={loginStyles.field}>
           <label style={loginStyles.label}>아이디</label>
