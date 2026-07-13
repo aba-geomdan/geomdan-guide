@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   supabaseConfigured,
+  authSignIn, authSignOut, authCurrentUser,
   dbGetUser, dbListUsers, dbCreateUser, dbUpdatePassword, dbDeleteUser,
   dbListGuides, dbInsertGuide, dbDeleteGuide, dbUpdateGuide,
   dbGetFavorites, dbSetFavorites,
@@ -1450,21 +1451,9 @@ function safeRemoveSession(key) {
   } catch (e) {}
 }
 
-// admin 기본 계정이 DB에 없으면 생성 (Supabase 모드)
+// A방식: 관리자 계정은 이미 Supabase Auth 에 존재하므로 자동생성 불필요
 async function ensureAdminDB() {
-  try {
-    const existing = await dbGetUser(DEFAULT_ADMIN.id);
-    if (!existing) {
-      await dbCreateUser({
-        id: DEFAULT_ADMIN.id,
-        name: DEFAULT_ADMIN.name,
-        role: 'admin',
-        password: DEFAULT_ADMIN.password,
-      });
-    }
-  } catch (e) {
-    // 네트워크 등 실패 시 조용히 무시 (로그인 시 다시 시도)
-  }
+  return; // no-op
 }
 
 // 사용자 목록 가져오기 (없으면 admin 기본 계정 생성)
@@ -1506,32 +1495,30 @@ function saveUsers(users) {
   safeSetLS(STORAGE_KEY_USERS, JSON.stringify(users));
 }
 
-// 로그인: ID/비번 검증 후 세션 저장
+// 로그인: 이메일/비번 Auth 검증 후 세션 저장
 async function authenticate(id, password) {
-  const trimmedId = (id || '').trim();
-  if (!trimmedId) return { ok: false, error: '아이디를 입력해주세요' };
+  const email = (id || '').trim();
+  if (!email) return { ok: false, error: '이메일을 입력해주세요' };
 
   if (supabaseConfigured()) {
-    await ensureAdminDB();
-    let user;
-    try {
-      user = await dbGetUser(trimmedId);
-    } catch (e) {
-      return { ok: false, error: '서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.' };
-    }
-    if (!user) return { ok: false, error: '존재하지 않는 아이디입니다' };
-    if (user.is_active === false) return { ok: false, error: '비활성화된 계정입니다' };
-    const ok = await verifyPassword(password, user.pw_salt, user.pw_hash);
-    if (!ok) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
-    const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
+    const result = await authSignIn(email, password);
+    if (!result.ok) return { ok: false, error: result.error };
+    // session.id 는 Auth UUID → owner_id 로 사용됨
+    const session = {
+      id: result.user.id,
+      name: result.user.name,
+      role: result.user.role,
+      email: result.user.email,
+      loginAt: Date.now(),
+    };
     safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(session));
     return { ok: true, user: session };
   }
 
   // ── localStorage 폴백 (평문 비교) ──
   const users = await loadUsers();
-  const user = users.find(u => u.id === trimmedId);
-  if (!user) return { ok: false, error: '존재하지 않는 아이디입니다' };
+  const user = users.find(u => u.id === email);
+  if (!user) return { ok: false, error: '존재하지 않는 계정입니다' };
   if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
   const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
   safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(session));
@@ -1545,16 +1532,20 @@ async function loadSession() {
   try {
     const session = JSON.parse(raw);
     if (!session || !session.id) return null;
-    // 계정이 여전히 존재하는지 확인
+    // Auth 세션이 실제로 유효한지 확인
     if (supabaseConfigured()) {
       try {
-        const u = await dbGetUser(session.id);
-        if (!u || u.is_active === false) { safeRemoveSession(STORAGE_KEY_SESSION); return null; }
+        const u = await authCurrentUser();
+        if (!u) { safeRemoveSession(STORAGE_KEY_SESSION); return null; }
+        // 최신 정보로 세션 갱신 (id=UUID, role, name)
+        const fresh = { id: u.id, name: u.name, role: u.role, email: u.email, loginAt: session.loginAt || Date.now() };
+        safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(fresh));
+        return fresh;
       } catch (e) {
-        // 서버 확인 실패 시 일단 세션 유지 (오프라인 대비)
-        return session;
+        // 서버 확인 실패 시 세션 제거 (Auth는 오프라인 유지 안 함)
+        safeRemoveSession(STORAGE_KEY_SESSION);
+        return null;
       }
-      return session;
     }
     const users = await loadUsers();
     const stillExists = users.find(u => u.id === session.id);
@@ -1567,24 +1558,23 @@ async function loadSession() {
 
 function logout() {
   safeRemoveSession(STORAGE_KEY_SESSION);
+  // Auth 세션도 정리 (비동기, 실패해도 무방)
+  try { authSignOut(); } catch (e) {}
 }
 
-// 선생님 계정 추가
+// 선생님 계정 추가 (이메일 방식)
 async function createTeacher(id, name, password) {
-  const tId = (id || '').trim();
+  const email = (id || '').trim();
   let tName = (name || '').trim();
-  if (!tId) return { ok: false, error: '아이디를 입력해주세요' };
-  if (!password || password.length < 4) return { ok: false, error: '비밀번호는 4자 이상' };
-  // 아이디: 공백과 일부 특수문자만 금지 (한글/영문/숫자 허용)
-  if (/[\s/\\'"]/.test(tId)) return { ok: false, error: '아이디에 공백이나 특수문자는 쓸 수 없습니다' };
-  // 이름을 비우면 아이디를 이름으로 사용
-  if (!tName) tName = tId;
+  if (!email) return { ok: false, error: '이메일을 입력해주세요' };
+  if (!email.includes('@')) return { ok: false, error: '올바른 이메일 형식을 입력해주세요' };
+  if (!password || password.length < 6) return { ok: false, error: '비밀번호는 6자 이상' };
+  // 이름을 비우면 이메일 앞부분을 이름으로 사용
+  if (!tName) tName = email.split('@')[0];
 
   if (supabaseConfigured()) {
     try {
-      const existing = await dbGetUser(tId);
-      if (existing) return { ok: false, error: '이미 존재하는 아이디입니다' };
-      const u = await dbCreateUser({ id: tId, name: tName, role: 'teacher', password });
+      const u = await dbCreateUser({ email, id: email, name: tName, role: 'teacher', password });
       return { ok: true, user: u };
     } catch (e) {
       return { ok: false, error: e.message || '계정 생성 실패' };
@@ -1592,16 +1582,19 @@ async function createTeacher(id, name, password) {
   }
 
   const users = await loadUsers();
-  if (users.find(u => u.id === tId)) return { ok: false, error: '이미 존재하는 아이디입니다' };
-  const newUser = { id: tId, name: tName, password, role: 'teacher', createdAt: Date.now() };
+  if (users.find(u => u.id === email)) return { ok: false, error: '이미 존재하는 계정입니다' };
+  const newUser = { id: email, name: tName, password, role: 'teacher', createdAt: Date.now() };
   users.push(newUser);
   saveUsers(users);
   return { ok: true, user: newUser };
 }
 
 // 선생님 삭제
-async function deleteTeacher(userId) {
-  if (userId === DEFAULT_ADMIN.id) return { ok: false, error: '관리자는 삭제할 수 없습니다' };
+const ADMIN_UUID = 'aecb8a9c-000e-4ad5-9805-83450e9bc585';
+async function deleteTeacher(userId, userRole) {
+  if (userId === ADMIN_UUID || userRole === 'admin') {
+    return { ok: false, error: '관리자는 삭제할 수 없습니다' };
+  }
   if (supabaseConfigured()) {
     try {
       await dbDeleteUser(userId); // 가이드/즐겨찾기는 FK on delete cascade로 함께 삭제
@@ -1619,7 +1612,7 @@ async function deleteTeacher(userId) {
 
 // 비밀번호 변경
 async function changePassword(userId, newPassword) {
-  if (!newPassword || newPassword.length < 4) return { ok: false, error: '비밀번호는 4자 이상' };
+  if (!newPassword || newPassword.length < 6) return { ok: false, error: '비밀번호는 6자 이상' };
   if (supabaseConfigured()) {
     try {
       await dbUpdatePassword(userId, newPassword);
@@ -1716,13 +1709,13 @@ function LoginView({ onLogin }) {
         <input type="password" name="password" tabIndex={-1} aria-hidden="true" autoComplete="current-password" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, pointerEvents: 'none', zIndex: -1 }} />
 
         <div style={loginStyles.field}>
-          <label style={loginStyles.label}>아이디</label>
+          <label style={loginStyles.label}>이메일</label>
           <input
-            type="text"
+            type="email"
             value={id}
             onChange={(e) => setId(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-            placeholder="예: admin, kim, lee"
+            placeholder="이메일 주소"
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck="false"
@@ -1753,7 +1746,7 @@ function LoginView({ onLogin }) {
         </button>
 
         <div style={loginStyles.hint}>
-          본인 아이디와 비밀번호로 로그인하세요.<br />
+          본인 이메일과 비밀번호로 로그인하세요.<br />
           계정이 없으시면 원장님께 문의해 주세요.
         </div>
 
@@ -1960,9 +1953,9 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
 
   const handleDelete = (user) => {
     setConfirmAction({
-      message: `${user.name} (${user.id}) 선생님 계정과 보관함을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
+      message: `${user.name} (${user.email || user.id}) 선생님 계정과 보관함을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
       onConfirm: async () => {
-        await deleteTeacher(user.id);
+        await deleteTeacher(user.id, user.role);
         await refresh();
         setConfirmAction(null);
       },
@@ -2032,8 +2025,8 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
             <div style={adminStyles.addForm}>
               <div style={adminStyles.formRow}>
                 <input
-                  type="text"
-                  placeholder="아이디 (예: 민다솔)"
+                  type="email"
+                  placeholder="이메일 (예: kim@geomdan.com)"
                   value={newId}
                   onChange={(e) => setNewId(e.target.value)}
                   autoCapitalize="off"
@@ -2045,7 +2038,7 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
                 />
                 <input
                   type="text"
-                  placeholder="이름 (선택, 비우면 아이디 사용)"
+                  placeholder="이름 (선택, 비우면 이메일 사용)"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   autoComplete="off"
@@ -2054,7 +2047,7 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
                 />
                 <input
                   type="text"
-                  placeholder="비밀번호 (4자 이상)"
+                  placeholder="비밀번호 (6자 이상)"
                   value={newPw}
                   onChange={(e) => setNewPw(e.target.value)}
                   autoComplete="off"
@@ -2082,7 +2075,7 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
                 <div key={t.id} style={adminStyles.teacherCard}>
                   <div style={adminStyles.teacherInfo}>
                     <div style={adminStyles.userName}>{t.name}</div>
-                    <div style={adminStyles.userId}>아이디: {t.id} · 보관함 {getHistoryCount(t.id)}개</div>
+                    <div style={adminStyles.userId}>{t.email || t.id} · 보관함 {getHistoryCount(t.id)}개</div>
                   </div>
                   <div style={adminStyles.teacherActions}>
                     <button onClick={() => onViewTeacherHistory(t.id)} style={adminStyles.smallBtn}>
@@ -2110,7 +2103,7 @@ function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
               <div style={adminStyles.modalTitle}>비밀번호 변경 ({pwChangeFor})</div>
               <input
                 type="text"
-                placeholder="새 비밀번호 (4자 이상)"
+                placeholder="새 비밀번호 (6자 이상)"
                 value={newPwForReset}
                 onChange={(e) => setNewPwForReset(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handlePwReset(); }}
