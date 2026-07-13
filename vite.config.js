@@ -8,9 +8,9 @@ export default defineConfig({
     // 코드 난독화 — 빌드된 JS를 읽기 어렵게 변환.
     // 안정성을 위해 과도한 옵션(controlFlowFlattening 등)은 끔.
     obfuscator({
-      // node_modules(React 등 라이브러리)는 난독화하지 않고 내 코드만 처리
-      // (라이브러리까지 난독화하면 느려지고 깨질 위험이 커짐)
-      include: [/src\/.*\.(js|jsx|ts|tsx)$/],
+      // 번들된 출력 청크(assets/index-xxxx.js)를 대상으로 함.
+      // node_modules(React 등 라이브러리)는 exclude로 제외.
+      include: [/\.js$/],
       exclude: [/node_modules/],
       apply: 'build', // 개발(dev) 중에는 끄고, 배포 빌드 때만 적용
       debugger: false,
