@@ -250,15 +250,26 @@ export async function dbListGuides(ownerId) {
   return r.json();
 }
 
-export async function dbInsertGuide({ ownerId, topic, childName, payload }) {
+export async function dbInsertGuide({ ownerId, topic, childName, payload, childId }) {
   const headers = await authHeaders({ 'Prefer': 'return=representation' });
-  const r = await fetch(restUrl('gd_guides'), {
-    method: 'POST', headers,
-    body: JSON.stringify({ owner_id: ownerId, topic, child_name: childName || '', payload }),
+  const row = { owner_id: ownerId, topic, child_name: childName || '', payload };
+  // ★ [도구 연결] 통합본에서 연 경우에만 아이 번호를 함께 적는다
+  if (childId) row.child_id = childId;
+  let r = await fetch(restUrl('gd_guides'), {
+    method: 'POST', headers, body: JSON.stringify(row),
   });
+  let linkFailed = false;
+  if (!r.ok && childId) {
+    // child_id 칸이 아직 없을 때(SQL 전): 연결 없이 지금처럼 저장
+    delete row.child_id;
+    linkFailed = true;
+    r = await fetch(restUrl('gd_guides'), {
+      method: 'POST', headers, body: JSON.stringify(row),
+    });
+  }
   if (!r.ok) throw new Error('가이드 저장 실패');
   const arr = await r.json();
-  return arr[0];
+  return linkFailed ? { ...arr[0], _linkFailed: true } : arr[0];
 }
 
 export async function dbDeleteGuide(guideId) {
