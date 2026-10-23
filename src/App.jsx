@@ -1484,6 +1484,40 @@ async function authenticate(id, password) {
 }
 
 // 현재 세션 가져오기 (세션 자체는 기기 로컬에 보관 — 로그인 상태 유지용)
+// ★ [도구 연결] 통합본(원장님 화면)에서 '🏠 5분 가이드'로 열었을 때 넘겨받은 아이 번호·이름
+//   - 주소에는 아이 번호만(?aba_child=...), 이름은 같은 사이트 저장칸에 잠깐 맡겨 둔 것을 한 번 읽고 지운다.
+//   - 이 창 안에서는 새로고침해도 유지(sessionStorage). 관리자 계정일 때만 화면에 쓰인다.
+const ABA_HANDOFF_KEY = 'aba-guide-handoff';
+const ABA_LINK_KEY = 'aba-guide-link';
+function readAbaLink() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const cid = params.get('aba_child');
+    let link = null;
+    if (cid) {
+      try {
+        const h = JSON.parse(localStorage.getItem(ABA_HANDOFF_KEY) || 'null');
+        if (h && h.cid === cid && Date.now() - (h.ts || 0) < 30 * 60 * 1000) link = { cid, name: String(h.name || '') };
+      } catch (e) {}
+      try { localStorage.removeItem(ABA_HANDOFF_KEY); } catch (e) {}
+      if (link) { try { sessionStorage.setItem(ABA_LINK_KEY, JSON.stringify(link)); } catch (e) {} }
+      try { params.delete('aba_child'); const q = params.toString(); window.history.replaceState(null, '', window.location.pathname + (q ? '?' + q : '') + window.location.hash); } catch (e) {}
+      if (link) return link;
+    }
+    const saved = JSON.parse(sessionStorage.getItem(ABA_LINK_KEY) || 'null');
+    return saved && saved.cid ? saved : null;
+  } catch (e) { return null; }
+}
+function clearAbaLink() {
+  try { sessionStorage.removeItem(ABA_LINK_KEY); } catch (e) {}
+}
+// 한글 3글자 이상이면 첫 글자(성)를 뗀다 (함께놀이 앱과 같은 규칙)
+function abaGivenName(full) {
+  const n = (full || '').trim();
+  if (/^[가-힣]+$/.test(n) && n.length >= 3) return n.slice(1);
+  return n;
+}
+
 async function loadSession() {
   const raw = safeGetSession(STORAGE_KEY_SESSION);
   if (!raw) return null;
@@ -2637,6 +2671,9 @@ export default function App() {
   const [collapsedOwners, setCollapsedOwners] = useState({}); // 통합 조회 시 접힌 선생님 폴더
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(null);
+  const [abaLink, setAbaLink] = useState(() => readAbaLink()); // ★ [도구 연결]
+  const [abaLinkWarn, setAbaLinkWarn] = useState(false);
+  const abaNameFilledRef = useRef(false);
   const [checkTable, setCheckTable] = useState(
     Array(7).fill(null).map(() => ({ attempts: '', success: '' }))
   );
@@ -2654,6 +2691,13 @@ export default function App() {
       setBooting(false);
     })();
   }, []);
+
+  // ★ [도구 연결] 관리자일 때만, 통합본에서 넘어온 아이 이름(성 뺀 이름)을 한 번 채워 둔다
+  useEffect(() => {
+    if (!session || session.role !== 'admin' || !abaLink || abaNameFilledRef.current) return;
+    abaNameFilledRef.current = true;
+    if (!childName.trim()) setChildName(abaGivenName(abaLink.name));
+  }, [session, abaLink]);
 
   // 세션이 바뀔 때마다 그 사용자의 favorites/history 로드
   // (관리자가 특정 선생님 보관함 보는 중이면 그쪽 데이터 로드)
@@ -2884,7 +2928,9 @@ export default function App() {
             topic: t,
             childName: childName.trim(),
             payload: result,
+            childId: (session.role === 'admin' && abaLink) ? abaLink.cid : undefined, // ★ [도구 연결]
           });
+          if (inserted && inserted._linkFailed) setAbaLinkWarn(true);
           if (inserted && inserted.guide_id) {
             result.guide_id = inserted.guide_id;
             result.owner_id = session.id;
@@ -3759,6 +3805,21 @@ export default function App() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ★ [도구 연결] 통합본에서 연 경우 — 관리자 화면에만 */}
+      {session?.role === 'admin' && abaLink && !isEditing && (
+        <div className="no-print" style={{ margin: '0 0 12px', padding: '10px 14px', background: '#fff', border: '1.5px solid #f4d4dc', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#a84960' }}>🔗 통합본 · {abaLink.name || '이 아이'} 기록에 연결됨</span>
+          <span style={{ fontSize: 12, color: '#8a6571', flex: 1, minWidth: 200 }}>
+            여기서 만드는 가이드가 통합본 '가정 연계'에 모입니다.
+            {abaLinkWarn && <b style={{ color: '#B45309' }}> 방금 가이드는 연결 없이 저장됐습니다(SQL 확인 필요).</b>}
+          </span>
+          <button onClick={() => { clearAbaLink(); setAbaLink(null); setAbaLinkWarn(false); }}
+            style={{ border: '1px solid #f4d4dc', background: '#fff', color: '#a84960', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+            연결 해제
+          </button>
         </div>
       )}
 
