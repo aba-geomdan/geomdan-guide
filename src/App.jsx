@@ -1,153 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  supabaseConfigured,
-  authSignIn, authSignOut, authCurrentUser,
-  dbGetUser, dbListUsers, dbCreateUser, dbUpdatePassword, dbDeleteUser,
-  dbListGuides, dbInsertGuide, dbDeleteGuide, dbUpdateGuide,
-  dbGetFavorites, dbSetFavorites,
-  dbGetCustomTemplates, dbSetCustomTemplates,
-  verifyPassword,
-} from './supabase.js';
+import React, { useState, useRef, useEffect } from "react";
 
-// ============================================================
-// 도메인 잠금 — 허용된 주소에서만 앱이 작동.
-// 남이 코드를 복사해 다른 사이트에 올려도 화면이 뜨지 않게 함.
-// 허용: aba-geomdan.github.io (배포) + localhost/127.0.0.1 (로컬 개발)
-// ============================================================
+/* ================================================================
+   도메인 잠금 (지적재산 보호)
+   허용 host 외에서는 앱 렌더링 차단
+================================================================ */
 (function domainGuard() {
   try {
-    if (typeof window === 'undefined') return;
-    const host = window.location.hostname || '';
-    const allowed =
-      host === 'aba-geomdan.github.io' ||
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === '' ||
-      host.endsWith('.local');
-    if (!allowed) {
-      document.documentElement.innerHTML =
-        '<body style="margin:0;display:flex;align-items:center;justify-content:center;' +
-        'min-height:100vh;font-family:sans-serif;background:#fdf5f5;color:#a84960;' +
-        'text-align:center;padding:24px;">' +
-        '<div><div style="font-size:18px;font-weight:700;margin-bottom:8px;">' +
-        '접근할 수 없는 페이지입니다</div>' +
-        '<div style="font-size:13px;color:#8a6571;line-height:1.6;">' +
-        '이 애플리케이션은 검단ABA언어행동연구소의 지적재산이며,<br>' +
-        '허가된 주소에서만 이용할 수 있습니다.</div></div></body>';
-      throw new Error('unauthorized host');
-    }
+    var host = window.location.hostname;
+    var allowed =
+      host === "aba-geomdan.github.io" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "" ||
+      /\.local$/.test(host);
+    if (allowed) return;
+    document.documentElement.innerHTML =
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+      'background:#FFF0F3;font-family:system-ui,-apple-system,sans-serif;padding:24px;">' +
+      '<div style="text-align:center;max-width:420px;">' +
+      '<div style="font-size:20px;font-weight:700;color:#D4728A;margin-bottom:12px;">접근할 수 없는 페이지</div>' +
+      '<div style="font-size:14px;color:#D4728A;line-height:1.6;">검단ABA언어행동연구소의 지적재산입니다.</div>' +
+      '</div></div>';
+    throw new Error("Unauthorized host");
   } catch (e) {
-    if (e && e.message === 'unauthorized host') throw e;
+    if (e && e.message === "Unauthorized host") throw e;
   }
 })();
 
-// ───────── 스토리지 키 (사용자별 분리 v3) ─────────
-const STORAGE_KEY_FAVORITES_BASE = 'gd_aba_parent_guide_favorites_v3';
-const STORAGE_KEY_HISTORY_BASE = 'gd_aba_parent_guide_history_v3';
-
-// 사용자별 스토리지 키 생성 (예: gd_aba_parent_guide_history_v3__user_abc123)
-function favoritesKey(userId) {
-  return `${STORAGE_KEY_FAVORITES_BASE}__${userId}`;
-}
-function historyKey(userId) {
-  return `${STORAGE_KEY_HISTORY_BASE}__${userId}`;
-}
-
-// 사용자 목록 / 세션
-const STORAGE_KEY_USERS = 'gd_aba_users_v1';
-const STORAGE_KEY_SESSION = 'gd_aba_session_v1';
-
-// claude-relay(Edge Function) 호출 인증용 anon key. VITE_SUPABASE_ANON_KEY와 동일.
-const AI_RELAY_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkdWJncnh3aWp5ZHdmYWJ3cG5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDk1ODgsImV4cCI6MjA5NzE4NTU4OH0.nqNO3vany3M6fzmG5BG6QVdvi8BW2UbhTDhxNnwvA88';
-
-// 호환성용 (마이그레이션에 사용)
-const STORAGE_KEY_FAVORITES_V2 = 'gd_aba_parent_guide_favorites_v2';
-const STORAGE_KEY_HISTORY_V2 = 'gd_aba_parent_guide_history_v2';
-
-// 관리자 기본 계정 (첫 실행 시 자동 생성)
-// 비밀번호는 빌드 시점 환경변수(.env)에서 주입 — 공개 소스에 평문을 남기지 않음
-const DEFAULT_ADMIN = {
-  id: '민다혜',
-  name: '민다혜 원장님',
-  password: import.meta.env.VITE_ADMIN_PASSWORD || 'changeme',
-  role: 'admin',
-  createdAt: 0, // 첫 실행 시 채워짐
-};
-
-const LOGO_DATA_URI = 'data:image/png;base64,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';
-
-const DEFAULT_FAVORITES = [
-  '포크로 간식 찍어 먹기',
-  '소리지르는 행동',
-  '신발 스스로 신기',
-  '눈맞춤 늘리기',
-  '차례 기다리기',
-  '이름 부르면 대답하기',
-  '장난감 정리하기',
-  '양치질 거부 줄이기',
-];
-
-// 행동 기능 4가지
-const FUNCTIONS = [
-  {
-    id: 'attention',
-    label: '관심끌기',
-    desc: '엄마/아빠/주변 사람의 시선이나 반응을 얻기 위함',
-    example: '예) 어머님이 통화 중일 때 소리지르기, 손님 왔을 때 떼쓰기',
-    color: '#e07187',
-  },
-  {
-    id: 'escape',
-    label: '회피',
-    desc: '하기 싫은 과제나 불편한 상황에서 벗어나기 위함',
-    example: '예) 양치 시간에 도망가기, 학습지 보면 짜증내기',
-    color: '#c95a78',
-  },
-  {
-    id: 'tangible',
-    label: '요구',
-    desc: '원하는 물건·간식·활동을 얻기 위함',
-    example: '예) 과자 달라고 보채기, 영상 틀어달라고 울기',
-    color: '#a84960',
-  },
-  {
-    id: 'sensory',
-    label: '자기자극',
-    desc: '특정 감각이 즐겁거나 안정되어 스스로 반복함',
-    example: '예) 손 흔들기, 같은 소리 반복, 빙글빙글 돌기',
-    color: '#d97a92',
-  },
-  {
-    id: 'skill',
-    label: '기술 습득 (문제행동 아님)',
-    desc: '문제행동이 아니라, 새로운 기술·활동을 단계적으로 가르칠 때',
-    example: '예) 가위질, 색칠, 블록 쌓기, 젓가락질, 숟가락질, 단추 끼우기',
-    color: '#5a8a6a',
-  },
-  {
-    id: 'other',
-    label: '기타 / 복합',
-    desc: '위에 딱 맞지 않거나 여러 기능이 섞여 있을 때',
-    example: '예) 기능 파악이 어려운 경우, 상황별로 기능이 바뀌는 경우',
-    color: '#7a3a52',
-  },
-];
-
-// (SYSTEM_PROMPT 제거됨 — AI 호출을 로컬 템플릿으로 대체)
-
-// ★ [AI 끄기] false면 AI를 부르지 않고 미리 써 둔 문구로만 가이드를 만든다.
-const USE_GUIDE_AI = false;
-
-const LOADING_STAGES = [
-  { at: 0,  text: '예상 행동 기능을 살펴보고 있습니다',     percent: 12 },
-  { at: 4,  text: '측정 가능한 목표를 설정하고 있습니다',   percent: 30 },
-  { at: 9,  text: '기능에 맞는 개입 절차를 설계하고 있습니다', percent: 52 },
-  { at: 15, text: '강화 계획을 다듬고 있습니다',           percent: 74 },
-  { at: 22, text: '주간 체크표를 준비하고 있습니다',       percent: 90 },
-  { at: 30, text: '조금만 더 기다려주세요',                percent: 96 },
-];
-
-// 한국어 받침 판별: 마지막 글자에 받침이 있으면 true
+// =====================================================================
+// 가정 자료 — 목록·검사·예비 문구 (한 파일로 묶음. 다른 이름과 섞이지 않게 안에 넣어 둠)
+// =====================================================================
+const HomeLib = (() => {
+// 가정 자료 — 미리 쓴 문구(예비용). geomdan-guide의 buildLocalGuide를 그대로 옮김.
+// AI가 실패하거나 검사에 걸리면 이 문구로 바뀐다.
+/* eslint-disable */
 function hasJongseong(str) {
   if (!str) return false;
   const lastChar = str.trim().slice(-1);
@@ -195,7 +81,7 @@ function callNameOr(name) {
 // 영역(domain) 정의
 // 주제를 키워드로 분류해서, 실천 내용이 영역마다 달라지게 한다.
 // (기능=왜 그러는지 / 영역=무엇을 어떻게 연습하는지)
-// ──────────────────────────────────────────────
+
 const DOMAINS = [
   {
     id: 'language',
@@ -1200,54 +1086,6 @@ function topicPlus(topic, withJong, withoutJong) {
   return hasJongseong(t) ? `${t}${withJong}` : `${t}${withoutJong}`;
 }
 
-// 관리자(선생님)가 추가한 커스텀 템플릿 저장 키 (localStorage 폴백용)
-const STORAGE_KEY_CUSTOM_TEMPLATES = 'gd_aba_custom_templates_v1';
-
-// 커스텀 템플릿 메모리 캐시 (앱 시작 시 1회 로드 후 동기 접근)
-let _customTemplatesCache = null;
-
-// 캐시를 Supabase(또는 localStorage)에서 채운다. 앱 시작 시 호출.
-async function refreshCustomTemplates() {
-  if (supabaseConfigured()) {
-    try {
-      _customTemplatesCache = await dbGetCustomTemplates();
-    } catch (e) {
-      _customTemplatesCache = {};
-    }
-  } else {
-    try {
-      const raw = safeGetLS(STORAGE_KEY_CUSTOM_TEMPLATES);
-      _customTemplatesCache = raw ? (JSON.parse(raw) || {}) : {};
-    } catch (e) {
-      _customTemplatesCache = {};
-    }
-  }
-  return _customTemplatesCache;
-}
-
-// 동기 접근: 캐시 반환 (가이드 생성 중 사용)
-function loadCustomTemplates() {
-  if (_customTemplatesCache) return _customTemplatesCache;
-  // 캐시 미초기화 시 localStorage 폴백 시도
-  try {
-    const raw = safeGetLS(STORAGE_KEY_CUSTOM_TEMPLATES);
-    return raw ? (JSON.parse(raw) || {}) : {};
-  } catch (e) { return {}; }
-}
-
-// 저장: 캐시 갱신 + Supabase/localStorage 기록
-async function saveCustomTemplates(obj) {
-  _customTemplatesCache = obj;
-  if (supabaseConfigured()) {
-    try { await dbSetCustomTemplates(obj); return true; }
-    catch (e) { return false; }
-  }
-  try {
-    safeSetLS(STORAGE_KEY_CUSTOM_TEMPLATES, JSON.stringify(obj));
-    return true;
-  } catch (e) { return false; }
-}
-
 const GUIDE_FIELDS = ['function_analysis', 'goal', 'materials', 'practice', 'waiting', 'reinforcement', 'weekly_focus', 'next_priority'];
 
 // AI 없이 로컬 템플릿으로 가이드 본문(9필드) 생성
@@ -1267,14 +1105,15 @@ const INTRO_VARIANTS = [
   '어머님, 이번 주 {NM}와 집에서 해 볼 5분 연습을 보내드립니다. 주제는 ‘{TP}’입니다.',
 ];
 
-function buildLocalGuide(topic, fn, childName, otherDetail, domainId, seed, level, altBehavior) {
+function buildLocalGuide(topic, fn, childName, otherDetail, domainId, seed, level, altBehavior, noTopic) {
   const s = Number.isFinite(seed) ? seed : 0;
   const lv = level || 'mid';
   const baseFn = GUIDE_TEMPLATES[fn.id] || GUIDE_TEMPLATES.other;
   const dom = domainId || detectDomain(topic);
   const domFields = DOMAIN_FIELDS[dom] || {};
-  const topicTpl = matchTopicTemplate(topic) || {};
-  const custom = loadCustomTemplates();
+  // 직접 입력한 기술은 비슷한 낱말의 다른 주제 문구가 끼어들지 않게 주제 문구를 쓰지 않는다
+  const topicTpl = noTopic ? {} : (matchTopicTemplate(topic) || {});
+  const custom = {};
   const customKey = `${fn.id}__${dom}`;
   const customTpl = custom[customKey] || {};
 
@@ -1341,4562 +1180,4346 @@ function buildLocalGuide(topic, fn, childName, otherDetail, domainId, seed, leve
   return { intro, ...fields, domainId: dom, level: lv };
 }
 
-// ──────────────────────────────────────────────
-// [3단계] AI 프롬프트 조립을 서버(guide-ai Edge Function)로 이관.
-// 앱은 재료(topic·fn·childName·otherDetail·domainId·level)만 보내고,
-// 말투·임상 규칙 프롬프트는 서버에서만 조립한다(클라이언트 노출 방지).
-// ──────────────────────────────────────────────
 
-function extractJSON(text) {
-  if (!text) return null;
-  let cleaned = String(text).trim();
+// 가정 자료 — 세 갈래(놀이 루틴 / 생활 기술 / 행동 대처) 공통 목록·검사·예비 문구·글 만들기
+// 원장님 확정 2026-10-29
 
-  // 1) 마크다운 코드블록 제거
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+// ─────────────────────────────────────────────
+// 목록
+// ─────────────────────────────────────────────
+const BRANCHES = [
+  { id: "play", label: "놀이 루틴", desc: "좋아하는 놀잇감으로 엄마와 주고받는 놀이" },
+  { id: "skill", label: "생활 기술", desc: "집에서 한 단계씩 연습할 일상 기술" },
+  { id: "behavior", label: "행동 대처", desc: "줄이고 싶은 행동과 그 이유에 맞는 대처" },
+];
+const BRANCH_LABEL = { play: "놀이 루틴", skill: "생활 기술", behavior: "행동 대처" };
 
-  // 2) 첫 { 위치 찾기
-  const firstBrace = cleaned.indexOf('{');
-  if (firstBrace === -1) return null;
-  cleaned = cleaned.substring(firstBrace);
+const PLAY_GOALS = [
+  "말로 요청하기", "말 알아듣기", "함께 보기", "눈맞춤", "이름 부르면 반응", "따라 하기",
+  "차례 주고받기", "손 놀이", "흉내·가장 놀이", "짝짓기·세기", "몸 놀이",
+];
 
-  // 3) 마지막 } 위치를 정확히 찾기 (중첩 고려)
-  let depth = 0;
-  let lastValidEnd = -1;
-  let inString = false;
-  let escape = false;
-  for (let i = 0; i < cleaned.length; i++) {
-    const ch = cleaned[i];
-    if (escape) { escape = false; continue; }
-    if (ch === '\\') { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) { lastValidEnd = i; break; }
+const SKILL_GROUPS = [
+  { group: "먹기", items: ["숟가락·포크", "컵으로 마시기", "새 음식 맛보기"] },
+  { group: "배변", items: ["소변 가리기", "대변 가리기", "기저귀 떼기", "화장실 뒤처리"] },
+  { group: "씻기", items: ["손 씻기", "양치", "세수", "머리 감기·목욕", "코 풀기"] },
+  { group: "옷", items: ["옷 입고 벗기", "신발 신기", "양말 신기", "단추·지퍼"] },
+  { group: "생활", items: ["장난감 정리", "잠자리 준비", "외출 준비", "손톱 깎기·머리 자르기 참기"] },
+];
+
+const BEHAVIORS = [
+  { id: "scream", label: "소리지르기" },
+  { id: "tantrum", label: "떼쓰기·울기·드러눕기" },
+  { id: "aggression", label: "때리기·던지기·물기", danger: true },
+  { id: "selfinjury", label: "자해(머리 박기 등)", danger: true },
+  { id: "repetitive", label: "반복 행동" },
+  { id: "avoid", label: "해야 할 일 피하기", fn: "escape" },
+  { id: "transition", label: "다음 활동으로 못 넘어감" },
+  { id: "elope", label: "도망가기", danger: true },
+];
+
+const FNS = [
+  { id: "attention", label: "관심끌기", desc: "봐 주길 바람" },
+  { id: "escape", label: "회피", desc: "하기 싫은 걸 피함" },
+  { id: "tangible", label: "요구", desc: "원하는 걸 얻으려 함" },
+  { id: "sensory", label: "자기자극", desc: "그 느낌이 좋아서" },
+  { id: "unknown", label: "잘 모르겠음", desc: "엄마께 관찰 기록 안내가 나갑니다" },
+];
+const FN_LABEL = Object.fromEntries(FNS.map((f) => [f.id, f.label]));
+
+const LEVEL3 = [
+  { id: "early", label: "초기" },
+  { id: "mid", label: "중간" },
+  { id: "high", label: "상위" },
+];
+const LEVEL3_HINT = {
+  skill: { early: "대부분 도움 필요", mid: "일부는 혼자", high: "거의 혼자" },
+  behavior: { early: "바로 도와야 함", mid: "도우면 바꿈", high: "스스로 바꿈" },
+};
+const LEVEL3_LABEL = { early: "초기", mid: "중간", high: "상위" };
+
+// 안전 안내 — 원장님 승인 문구. 앱이 그대로 넣는다(AI가 쓰지 않음).
+const SAFETY_TITLE = "다칠 수 있는 행동이 나올 때는 먼저 이렇게 해 주세요";
+const SAFETY_LINES = [
+  "주변의 위험한 물건을 먼저 치워 주세요.",
+  "형제나 다른 사람은 아이와 떨어지게 해 주세요.",
+  "머리를 박는 등 스스로 다치게 하면, 손이나 쿠션으로 부딪히는 곳을 막아 주세요.",
+  "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.",
+  "잠잠해지면 평소 하던 일로 돌아가 주세요.",
+  "아이를 붙잡거나 누르지 마세요. 이런 행동이 자주 있거나 심하면 바로 센터에 알려 주세요.",
+];
+
+// ─────────────────────────────────────────────
+// 이 방법을 쓰는 이유 — 고정 문구(원장 검토). AI가 쓰지 않고 앱이 그대로 넣는다.
+// mom: 엄마용 쉬운 설명 / teacher: 선생님용 근거 이름
+// ─────────────────────────────────────────────
+const EVIDENCE = {
+  play: {
+    mom: "아이는 좋아하는 놀이 안에서 가장 잘 배웁니다. 엄마가 놀잇감을 잠깐 쥐고 기다리면 아이가 소리나 말로 ‘더’를 알릴 기회가 생기고, 알리자마자 놀이를 이어 주면 ‘말하면 원하는 일이 일어난다’는 것을 자연스럽게 배웁니다. 하루 5분이라도 매일 같은 놀이를 반복하면, 아이가 다음에 올 말과 행동을 예상하고 먼저 해 보려는 모습이 늘어납니다.",
+    teacher: "부모 실행 중재(PII), 자연적 중재(NI; 공동활동 일과), 시간 지연(TD), 모델링(MD), 강화(R; 자연적 강화)",
+  },
+  skill: {
+    mom: "한 번에 다 가르치면 아이는 어디서부터 해야 할지 모릅니다. 기술을 작은 단계로 나누고, 처음에는 손을 받쳐 함께 하다가 도움을 조금씩 줄이면 아이가 스스로 하는 부분이 늘어납니다. 해냈을 때 바로 칭찬하거나 좋아하는 것으로 이어 주면, 다음에도 해 보려는 마음이 생깁니다.",
+    teacher: "부모 실행 중재(PII), 과제 분석(TA), 촉구(PP; 촉구 용암), 시간 지연(TD), 강화(R)",
+  },
+  attention: {
+    mom: "이 행동 뒤에 엄마가 쳐다보거나 말을 걸어 주면, 아이는 ‘이렇게 하면 엄마가 온다’고 배웁니다. 그래서 행동에는 반응을 줄이고, ‘엄마’ 부르기처럼 알맞은 방법을 쓸 때 바로 반응해 주면 아이가 그 방법을 더 자주 쓰게 됩니다. 평소에 엄마가 먼저 다가가 짧게라도 함께 놀아 주면, 관심을 끌려는 행동 자체가 줄어듭니다.",
+    teacher: "기능적 의사소통 훈련(FCT), 소거(EXT; 계획된 무시), 차별 강화(DR; DRA), 선행 사건 중재(ABI; 관심 미리 주기)",
+  },
+  escape: {
+    mom: "하기 싫은 일 앞에서 이 행동을 했더니 그 일이 없어지면, 아이는 다음에도 같은 행동을 합니다. 그래서 행동이 나와도 할 일을 바로 없애지는 않되 억지로 시키지도 않고, 할 일을 아주 작게 줄여 한 가지만 함께 끝낸 뒤 쉬게 합니다. 또 ‘그만’이나 ‘쉬고 싶어요’로 알리면 바로 잠깐 쉬게 해 줍니다. 그러면 아이는 행동 대신 말이나 카드로 알리는 법을 배우고, 할 일도 조금씩 끝까지 해내게 됩니다.",
+    teacher: "기능적 의사소통 훈련(FCT; 휴식 요청), 소거(EXT; 도피 소거), 선행 사건 중재(ABI; 과제 수정·나누기), 차별 강화(DR; DRA)",
+  },
+  tangible: {
+    mom: "울거나 떼를 써서 원하는 것을 얻으면, 아이는 그 방법이 통한다고 배웁니다. 그래서 울 때는 주지 않고, 말이나 카드로 알릴 때 바로 줍니다. 끝나기 전에 미리 알려 주면 갑자기 끝나는 느낌이 줄어 행동도 함께 줄어듭니다.",
+    teacher: "기능적 의사소통 훈련(FCT; 요구하기), 소거(EXT), 차별 강화(DR; DRA), 선행 사건 중재(ABI; 전환 예고)",
+  },
+  sensory: {
+    mom: "이 행동은 그 느낌이 좋아서 스스로 되풀이하는 것일 수 있어, 혼낸다고 줄지 않습니다. 비슷한 느낌을 주는 다른 놀이를 가까이 두고 그쪽으로 옮겨 가게 도우면, 아이가 같은 느낌을 다른 방법으로 채울 수 있습니다.",
+    teacher: "선행 사건 중재(ABI; 비슷한 감각의 대체 활동 미리 제공), 반응 차단·전환(RIR), 차별 강화(DR; DRA)",
+  },
+  unknown: {
+    mom: "같은 행동이라도 아이마다, 상황마다 이유가 다릅니다. 이유를 모른 채 대처하면 오히려 행동이 늘 수 있어서, 먼저 일주일 동안 언제, 무슨 일 다음에 나오는지 적어 보는 것이 가장 정확한 출발입니다. 적어 주신 기록을 보고 센터에서 이유에 맞는 방법을 정하겠습니다.",
+    teacher: "기능 행동 평가(FBA; ABC 관찰 기록부터 시작) — 기능 확인 후 중재 결정",
+  },
+};
+const EVIDENCE_NOTE = "선생님용 근거는 자폐 근거기반실천 보고서(NCAEP, 2020; Steinbrenner 외)의 근거기반실천 항목 이름이며, 괄호 안은 그 항목 안에서 센터가 적용하는 방법입니다.";
+function evidenceFor(r) {
+  if (!r) return null;
+  if (r.branch === "play") return EVIDENCE.play;
+  if (r.branch === "skill") return EVIDENCE.skill;
+  return EVIDENCE[r.input?.fn] || EVIDENCE.unknown;
+}
+const NEXT_NOTE = "다음 단계로 넘어갈지는 어머님 체크표를 보고 센터에서 함께 정하겠습니다.";
+const BEH_FIRST = { sensory: "그 행동을 계속 하려고 할 때", unknown: "기록하기 어려울 때" };
+function troubleLabels(branch, fn) {
+  if (branch === "play") return ["놀이에 관심이 없을 때", "혼자서만 가지고 놀 때", "너무 쉬워할 때"];
+  if (branch === "skill") return ["안 하려고 할 때", "울거나 짜증 낼 때", "너무 쉬워할 때"];
+  return [BEH_FIRST[fn] || "처음 며칠 행동이 더 심해질 때", "대신할 행동을 안 할 때", "밖이나 다른 사람 앞에서 그럴 때"];
+}
+
+// 길·차도로 뛰어가는 행동은 손을 잡는 것이 안전이므로 마지막 줄을 바꾼다
+function safetyLinesFor(inp) {
+  const elope = inp && (inp.behavior === "도망가기" || /차도|찻길|길로|도로/.test(inp.situation || ""));
+  if (!elope) return SAFETY_LINES;
+  return [
+    "길에서는 늘 손을 잡고 걷고, 차가 다니는 쪽에서 먼 쪽에 아이를 세워 주세요.",
+    "뛰어가면 눈을 떼지 말고 바로 따라가 손을 잡아 주세요. 바닥에 누르거나 세게 끌어당기지는 않습니다.",
+    "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.",
+    "잠잠해지면 평소 하던 일로 돌아가 주세요.",
+    "이런 행동이 자주 있거나 위험했던 일이 있으면 바로 센터에 알려 주세요.",
+  ];
+}
+
+const INTRO = (call) => `어머님, 이번 주 ${call}와 집에서 해 볼 5분 연습을 보내드립니다.`;
+
+// ─────────────────────────────────────────────
+// 앱 확인(서버 검사와 별도로 한 번 더)
+// ─────────────────────────────────────────────
+const JARGON = ["모방", "유도", "어휘", "발성", "촉구", "강화", "소거", "개입", "대체 행동", "대체행동", "기능", "선행", "일반화", "변별", "자발", "공동주의", "프롬프트", "JAR", "ABA", "ESDM", "모델링"];
+const BANNED_BEH = /붙잡|붙들|눌러|누르세요|빼앗|뺏|타임아웃|벌을|벌로|벌 주|약을|약물|진단|병원에 가/;
+
+// 엄마에게 나가는 글만 모은다(선생님용 칸 제외)
+function momStrings(branch, d) {
+  if (!d) return [];
+  const out = [];
+  const push = (v) => {
+    if (typeof v === "string") out.push(v);
+    else if (Array.isArray(v)) v.forEach(push);
+    else if (v && typeof v === "object") Object.entries(v).forEach(([k, x]) => { if (k !== "teacher") push(x); });
+  };
+  Object.entries(d).forEach(([k, v]) => { if (k !== "teacher_note") push(v); });
+  return out;
+}
+
+const NEED = {
+  play: { title: "s", goals: 1, materials: "s", setup: 1, scenes: 5, variations: 1, closing: 1, home_tips: 1, watch: "s", when_to_do: 2, troubles: 3, reason: "s" },
+  skill: { title: "s", why: "s", goal: "s", materials: "s", steps: 3, waiting: "s", praise: "s", if_refuses: "s", check_label: "s", next: "s", say: 2, when_to_do: 2, troubles: 3, reason: "s" },
+  behavior: { title: "s", why: "s", prevent: 2, when_happens: "s", alt: "s", teach: 3, praise: "s", check_behavior: "s", check_alt: "s", next: "s", say: 0, when_to_do: 1, troubles: 3, reason: "s" },
+};
+const SENTENCE_FIELDS = {
+  play: ["watch", "reason"],
+  skill: ["why", "waiting", "praise", "if_refuses", "next", "reason"],
+  behavior: ["why", "when_happens", "praise", "next", "reason"],
+};
+
+function appCheck(branch, d, opts = {}) {
+  const danger = opts.danger;
+  const errs = [];
+  if (!d || typeof d !== "object") return ["결과 없음"];
+  Object.entries(NEED[branch]).forEach(([k, need]) => {
+    const v = d[k];
+    if (need === "s") { if (typeof v !== "string" || !v.trim()) errs.push(`${k} 빈칸`); }
+    else if (!Array.isArray(v) || v.filter((x) => x && (typeof x !== "string" || x.trim())).length < need) errs.push(`${k} 개수 부족`);
+  });
+  if (branch === "play" && Array.isArray(d.scenes)) {
+    d.scenes.forEach((s, i) => { if (!s || !String(s.parent || "").trim()) errs.push(`장면${i + 1} 빈칸`); });
+  }
+  if (Array.isArray(d.troubles)) {
+    d.troubles.forEach((t, i) => { if (!t || !String(t.do || "").trim()) errs.push(`이럴 땐 ${i + 1} 빈칸`); });
+  }
+  // 센터 이야기는 선생님이 적어 준 내용이 있을 때만
+  if (!opts.center && String(d.center_link || "").trim()) errs.push("센터 내용 없는데 센터 이야기 씀");
+  if (opts.center) {
+    // 센터 글에 없는 숫자를 지어내지 않았는지 (센터 연결 문장 안의 숫자만 확인)
+    const given = new Set((opts.center.match(/\d+/g) || []));
+    const used = (String(d.center_link || "").match(/\d+/g) || []).filter((n) => !given.has(n));
+    if (used.length) errs.push("센터 글에 없는 숫자(" + used.join(", ") + ")");
+  }
+  const mom = momStrings(branch, d);
+  const joined = mom.join("\n");
+  const hit = JARGON.filter((j) => joined.includes(j));
+  if (hit.length) errs.push("전문용어(" + hit.join(", ") + ")");
+  if (/%/.test(joined)) errs.push("퍼센트 표현");
+  // 회피: 행동 때문에 할 일을 치우거나 그날 끝내게 하는 문장은 걸러 낸다
+  if (opts.fn === "escape" && /그날은|다음 날 다시|내일 다시|오늘은 그만/.test(joined)) errs.push("회피에 할 일 빼 주기");
+  // 아이 이름이 한 번도 안 나오면(다른 이름을 썼을 수 있음) 걸러 낸다
+  if (opts.name && !joined.includes(opts.name)) errs.push("아이 이름 없음");
+  if (/�|OO이|○○|\{[a-z_]+\}/.test(joined)) errs.push("깨진 글자·빈 이름");
+  if (branch !== "play") {
+    // "뺏지 마세요"처럼 하지 말라는 문장은 괜찮다
+    const re = new RegExp(BANNED_BEH.source, "g");
+    let m;
+    while ((m = re.exec(joined))) {
+      const after = joined.slice(m.index + m[0].length, m.index + m[0].length + 16);
+      if (!/^[^.\n]{0,9}(지 마|지 않|지 말|지는 마|지는 말|지는 않|면 안|는 것은 금지)/.test(after)) { errs.push("금지 표현(" + m[0] + ")"); break; }
     }
   }
+  SENTENCE_FIELDS[branch].forEach((k) => {
+    const v = String(d[k] || "").trim();
+    if (v && !/[.!?。…)’'"”다요]$/.test(v)) errs.push(`${k} 잘림`);
+  });
+  if (branch === "behavior" && danger && !/막아|손을 잡/.test(String(d.when_happens || ""))) errs.push("안전 첫 문장 없음");
+  if (opts.center && !String(d.center_link || "").trim()) errs.push("센터 글이 있는데 센터 칸 빈칸");
+  return errs;
+}
 
-  // 정상적으로 닫힌 JSON이 있으면 사용
-  if (lastValidEnd !== -1) {
-    const jsonStr = cleaned.substring(0, lastValidEnd + 1);
-    try {
-      return JSON.parse(jsonStr);
-    } catch (e) {
-      try {
-        return JSON.parse(jsonStr.replace(/[\u0000-\u001F]+/g, ' '));
-      } catch (e2) {}
-    }
+// AI 응답 정리: 코드펜스·앞뒤 말 제거
+function cleanData(branch, d, fn) {
+  const r = { ...d };
+  if (branch === "play" && Array.isArray(r.scenes)) {
+    r.scenes = r.scenes.map((s) => ({ label: s.label || "", parent: s.parent || "", teacher: s.teacher || s.strategy || "" }));
   }
-
-  // 4) JSON이 잘린 경우 복구 시도 (응답이 max_tokens로 잘림)
-  //    마지막 완전한 "field": "value" 쌍까지만 살리고 닫기
-  try {
-    // 마지막 큰따옴표 짝이 맞는 위치 찾기
-    let quoteCount = 0;
-    let lastSafeEnd = -1;
-    for (let i = 0; i < cleaned.length; i++) {
-      if (cleaned[i] === '\\') { i++; continue; }
-      if (cleaned[i] === '"') quoteCount++;
-      // 짝수개의 따옴표 + 쉼표 또는 } 직전이면 안전 위치
-      if (quoteCount % 2 === 0 && (cleaned[i] === ',' || cleaned[i] === '}')) {
-        lastSafeEnd = i;
+  if (branch === "play" && Array.isArray(r.goals)) {
+    r.goals = r.goals.map((g) => (typeof g === "string" ? { label: g, detail: "" } : { label: g.label || g.domain || "", detail: g.detail || "" }));
+  }
+  if (branch === "play" && Array.isArray(r.variations)) {
+    r.variations = r.variations.map((v) => (typeof v === "string" ? { title: "다르게 놀기", detail: v } : { title: v.title || "다르게 놀기", detail: v.detail || "" }));
+  }
+  if (Array.isArray(r.troubles)) {
+    const labels = troubleLabels(branch, fn);
+    r.troubles = labels.map((lb, i) => {
+      const t = r.troubles[i];
+      let x = typeof t === "string" ? t : (t && (t.do || t.text)) || "";
+      // "놀이에 관심이 없을 때: 놀이에 관심이 없으면 …"처럼 상황을 다시 쓴 앞부분은 뗀다
+      const stem = lb.replace(/\s*때$/, "").replace(/[을를]$/, "").slice(0, 5);
+      if (stem && x.startsWith(stem)) {
+        const m = x.match(/^[^.]{0,30}?(면|때는|때에는|때엔)\s+/);
+        if (m) x = x.slice(m[0].length);
       }
-    }
-    if (lastSafeEnd > 0) {
-      let salvage = cleaned.substring(0, lastSafeEnd);
-      // 끝의 쉼표 제거
-      salvage = salvage.replace(/,\s*$/, '');
-      salvage += '}';
-      const parsed = JSON.parse(salvage.replace(/[\u0000-\u001F]+/g, ' '));
-      return parsed;
-    }
-  } catch (e) {}
-
-  return null;
+      return { when: lb, do: x };
+    });
+  }
+  if (typeof r.center_link !== "string") r.center_link = "";
+  // 구어체 "~겁니다/~거예요"를 문어체로
+  const fixTone = (v) => (typeof v === "string" ? v.replace(/(\S) 겁니다/g, "$1 것입니다").replace(/(\S) 거예요/g, "$1 것입니다") : Array.isArray(v) ? v.map(fixTone) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fixTone(x)])) : v);
+  Object.keys(r).forEach((k) => { r[k] = fixTone(r[k]); });
+  return r;
 }
 
 // ─────────────────────────────────────────────
-// 사용자/세션 관리 유틸 (localStorage 임시 단계)
-// 나중에 Supabase 연동 시 이 부분만 교체하면 됨
+// 예비 문구(미리 쓴 문구)
 // ─────────────────────────────────────────────
+function jong(w) {
+  const c = (w || "").trim().slice(-1).charCodeAt(0);
+  if (c < 0xac00 || c > 0xd7a3) return false;
+  return (c - 0xac00) % 28 !== 0;
+}
+const ga = (w) => w + (jong(w) ? "이" : "가");
 
-function safeGetLS(key) {
-  try {
-    if (typeof localStorage === 'undefined') return null;
-    return localStorage.getItem(key);
-  } catch (e) { return null; }
-}
-function safeSetLS(key, value) {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(key, value);
-  } catch (e) {}
-}
-function safeRemoveLS(key) {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(key);
-  } catch (e) {}
-}
+const GOAL_TEXT = {
+  "말로 요청하기": ["{N} 원하는 것을 소리나 몸짓으로 알리는 모습을 봅니다.", "{N} 원하는 것을 낱말 하나로 말하는 모습을 봅니다.", "{N} 원하는 것을 두세 낱말로 말하는 모습을 봅니다.", "{N} 원하는 것을 짧은 문장으로 말하는 모습을 봅니다."],
+  "말 알아듣기": ["‘줘’, ‘여기’ 같은 짧은 말을 듣고 따라 움직이는 모습을 봅니다.", "‘공 줘’처럼 두 낱말 말을 듣고 따르는 모습을 봅니다.", "‘큰 거 줘’처럼 크기·색이 들어간 말을 듣고 따르는 모습을 봅니다.", "두 가지를 차례로 하라는 말을 듣고 따르는 모습을 봅니다."],
+  "함께 보기": "엄마가 가리키는 곳을 함께 보거나, {N} 먼저 보여 주려는 모습을 봅니다.",
+  "눈맞춤": "놀이 중에 {N} 엄마 얼굴을 보고 웃거나 기다리는 모습을 봅니다.",
+  "이름 부르면 반응": "이름을 한 번 불렀을 때 {N} 쳐다보거나 다가오는 모습을 봅니다.",
+  "따라 하기": "엄마가 보여 준 동작이나 소리를 {N} 비슷하게 따라 하는 모습을 봅니다.",
+  "차례 주고받기": "‘엄마 차례, {C} 차례’에 맞춰 번갈아 하는 모습을 봅니다.",
+  "손 놀이": "놀잇감을 집고, 넣고, 누르는 손 동작을 {N} 스스로 해 보는 모습을 봅니다.",
+  "흉내·가장 놀이": "먹는 척, 재우는 척처럼 {N} 흉내 내며 노는 모습을 봅니다.",
+  "짝짓기·세기": "같은 것끼리 모으거나 ‘하나, 둘’ 함께 세는 모습을 봅니다.",
+  "몸 놀이": "뛰고, 굴리고, 던지는 몸 놀이를 엄마와 즐겁게 이어 가는 모습을 봅니다.",
+};
+const DEFAULT_GOALS = { 1: ["눈맞춤", "따라 하기"], 2: ["말로 요청하기", "차례 주고받기"], 3: ["말로 요청하기", "흉내·가장 놀이"], 4: ["말 알아듣기", "흉내·가장 놀이"] };
 
-// ── 로그인 세션 전용 (sessionStorage — 브라우저/탭 닫으면 자동 로그아웃) ──
-function safeGetSession(key) {
-  try {
-    if (typeof sessionStorage === 'undefined') return null;
-    return sessionStorage.getItem(key);
-  } catch (e) { return null; }
-}
-function safeSetSession(key, value) {
-  try {
-    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, value);
-  } catch (e) {}
-}
-function safeRemoveSession(key) {
-  try {
-    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key);
-  } catch (e) {}
-  // 과거 localStorage에 남아있던 자동로그인 흔적도 제거
-  try {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
-  } catch (e) {}
-}
+const SUB_DEFAULT = { 기차: "작은 인형", 자동차: "다른 자동차", 블록: "다른 블록", 케이크: "인형", 소꿉놀이: "새 재료", 의사놀이: "인형", 엘리베이터: "인형", "미술/클레이": "숟가락" };
 
-// A방식: 관리자 계정은 이미 Supabase Auth 에 존재하므로 자동생성 불필요
-async function ensureAdminDB() {
-  return; // no-op
+const SCENE_PICK = [0, 1, 2, 4, 6];
+const PLAY_LEVEL_WATCH = {
+  1: "{N} 엄마 얼굴을 보며 소리를 내거나, 놀잇감을 내밀면 아주 좋은 신호입니다.",
+  2: "{N} 낱말 하나라도 먼저 말하거나, 엄마 차례를 기다리면 아주 좋은 신호입니다.",
+  3: "{N} 짧은 문장으로 말하거나, 놀이를 새로 바꿔 보려 하면 아주 좋은 신호입니다.",
+  4: "{N} ‘왜?’, ‘다음엔?’ 하고 이야기를 이어 가면 아주 좋은 신호입니다.",
+};
+
+function fixJosaLite(t) {
+  return String(t || "")
+    .replace(/([가-힣A-Za-z0-9]+)을\(를\)/g, (_, w) => w + (jong(w) ? "을" : "를"))
+    .replace(/([가-힣A-Za-z0-9]+)은\(는\)/g, (_, w) => w + (jong(w) ? "은" : "는"))
+    .replace(/([가-힣A-Za-z0-9]+)이\(가\)/g, (_, w) => w + (jong(w) ? "이" : "가"))
+    .replace(/([가-힣A-Za-z0-9]+)와\(과\)/g, (_, w) => w + (jong(w) ? "과" : "와"))
+    .replace(/([가-힣A-Za-z0-9]+)\(으\)로/g, (_, w) => {
+      const c = w.slice(-1).charCodeAt(0);
+      const j = c >= 0xac00 && c <= 0xd7a3 ? (c - 0xac00) % 28 : 0;
+      return w + (j === 0 || j === 8 ? "로" : "으로");
+    });
 }
 
-// 사용자 목록 가져오기 (없으면 admin 기본 계정 생성)
-async function loadUsers() {
-  if (supabaseConfigured()) {
-    await ensureAdminDB();
-    try {
-      const users = await dbListUsers();
-      return users.map(u => ({
-        id: u.id, name: u.name, role: u.role,
-        createdAt: u.created_at ? new Date(u.created_at).getTime() : 0,
-        is_active: u.is_active,
-      }));
-    } catch (e) {
-      return [];
-    }
+// 놀이 루틴 예비 문구. TOY_SCENES는 App.jsx에서 넘겨받는다.
+// 노래 활용 설명을 어머님 말로
+const SONG_FIX = [
+  [/발성·모방을 유도/g, "소리를 따라 내게 해 주세요"],
+  [/발성·모방 유도/g, "소리를 따라 내게 해 주세요"],
+  [/동작 모방 유도/g, "동작을 따라 하게 해 주세요"],
+  [/손동작 모방 유도/g, "손동작을 따라 하게 해 주세요"],
+  [/동작 모방 연결/g, "동작을 따라 하게 해 주세요"],
+  [/모방 유도/g, "따라 하게 해 주세요"],
+  [/발성 유도/g, "소리를 내게 해 주세요"],
+  [/발성 연결/g, "소리를 내게 해 주세요"],
+  [/어휘 확장/g, "새 낱말을 들려주세요"],
+  [/소근육 활동 연결/g, "손 놀이로 이어 주세요"],
+  [/이름대기 유도/g, "이름을 말해 보게 해 주세요"],
+  [/탐색 유도/g, "함께 찾아보게 해 주세요"],
+  [/유도$/g, "해 주세요"],
+];
+function momSong(s) {
+  let t = String(s);
+  SONG_FIX.forEach(([a, b]) => { t = t.replace(a, b); });
+  return t;
+}
+
+function localPlay({ call, levels, toys, goals }, TOY_SCENES) {
+  const lv = Math.min(...(levels && levels.length ? levels : [1]));
+  const main = toys[0] || "놀잇감";
+  const sub = toys[1] && toys[1] !== main ? toys[1] : SUB_DEFAULT[main] || "바구니";
+  const N = ga(call);
+  const fill = (t) =>
+    fixJosaLite(
+      String(t)
+        .split("{sub}(인형)").join(/인형/.test(sub) ? sub : `${sub}(인형)`)
+        .split("{main}").join(main)
+        .split("{sub}").join(sub)
+        .split("{child}").join(call)
+    );
+  const noBlock = (t) => (toys.includes("블록") ? t : String(t).replace(/블록이나 손으로/g, "손으로").replace(/\(블록으로 대체 가능\)/g, ""));
+  const gl = (goals && goals.length ? goals : DEFAULT_GOALS[lv] || DEFAULT_GOALS[1]).slice(0, 2);
+  const goalObjs = gl.map((g) => {
+    const t = GOAL_TEXT[g];
+    const s = Array.isArray(t) ? t[lv - 1] : t;
+    return { label: g, detail: s ? s.split("{N}").join(N).split("{C}").join(call) : `놀이 중에 ‘${g}’ 모습이 나오는지 봅니다.` };
+  });
+  const preset = TOY_SCENES[main];
+  let scenes, title, materials, songs, closing;
+  if (preset) {
+    title = preset.theme;
+    materials = toys.length > 1 ? `${toys.join(", ")}, 담을 바구니` : preset.materials;
+    scenes = SCENE_PICK.map((i) => preset.scenes[i]).filter(Boolean).map((s) => ({ label: s[0], parent: noBlock(fill(s[1])), teacher: fill(s[2]) }));
+    materials = noBlock(materials);
+    songs = (preset.songs || []).map(momSong);
+    closing = (preset.closing || []).map(fill).map((c) =>
+      /^다음 활동 예고/.test(c) ? "다음 할 일 알려 주기: ‘이제 손 씻으러 가요’처럼 다음에 할 일을 말해 주면 끝내기가 쉬워집니다." : c
+    );
+  } else {
+    title = `${main} 주고받기 놀이`;
+    materials = `${toys.join(", ")}, 담을 바구니나 상자`;
+    const M = (w, a, b) => w + (jong(w) ? a : b);
+    scenes = [
+      { label: "관심 끌기", parent: `${M(main, "을", "를")} 들고 "짠~! ${main} 나왔다~" 하며 ${call} 눈높이에서 흔들어 보여 주세요.`, teacher: "쳐다보면 3~5초 기다린 뒤 건네 첫 주고받기를 만든다." },
+      { label: "함께 만지기", parent: `${call}와 같이 ${M(main, "을", "를")} 만지며 "만져 보자!" 하고 동작을 크게 보여 주세요.`, teacher: "아동의 동작을 그대로 따라 하며 상호작용을 잇는다." },
+      { label: "주고받기", parent: `"엄마 줘~" 하고 손을 내밀고, 받으면 "고마워!" 하며 "이번엔 ${call} 줄게~" 다시 건네 주세요.`, teacher: "‘줘’, ‘여기’ 짧은 지시를 반복하고 건네면 즉시 반응한다." },
+      { label: "바꿔 보기", parent: `${M(sub, "을", "를")} 꺼내 "어? 이번엔 ${sub}!" 하며 놀란 표정을 지어 주세요.`, teacher: "예측을 살짝 깨 주의를 다시 모은다." },
+      { label: "마무리", parent: `"이제 쏙~ 넣자!" 하며 ${M(main, "을", "를")} 바구니에 넣는 모습을 보여 주세요.`, teacher: "‘넣어’ 지시 후 넣으면 바로 칭찬하며 마무리한다." },
+    ];
+    songs = ["좋아하는 동요의 박자에 맞춰 놀잇감을 움직여 보세요. 노래를 잠깐 멈추고 기다리면 아이가 ‘더’를 알리기 쉬워집니다.", "같은 동작에 짧은 노래(‘주세요~ 주세요~’)를 붙여 반복해 보세요."];
+    closing = ["“세 번만 더 하고 끝~ 셋, 둘, 하나!” 하고 끝을 미리 알려 주세요.", `${M(main, "을", "를")} 바구니에 하나씩 함께 넣어 주세요.`, "“이제 다음 거 하러 가요” 하고 다음 할 일을 알려 주세요."];
   }
-  // ── localStorage 폴백 ──
-  const raw = safeGetLS(STORAGE_KEY_USERS);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        if (!parsed.find(u => u.id === DEFAULT_ADMIN.id)) {
-          parsed.unshift({ ...DEFAULT_ADMIN, createdAt: Date.now() });
-          safeSetLS(STORAGE_KEY_USERS, JSON.stringify(parsed));
-        }
-        return parsed;
-      }
-    } catch (e) {}
+  const variations = toys.slice(1).filter((t) => t !== main).slice(0, 1).map((t) => ({ title: `${t}로 바꿔 놀기`, detail: `같은 순서로 ${M2(t)} 주인공 삼아 놀아 보세요. 새 이름을 또렷이 들려주세요.` }));
+  variations.push({ title: "노래로 놀기", detail: "같은 동작에 짧은 노래를 붙여 보세요. 노래를 뚝 멈추고 기다리면 아이가 소리나 몸짓으로 ‘더’를 알리기 쉬워집니다." });
+  if (variations.length < 2) variations.unshift({ title: "속도 바꾸기", detail: `${main} 놀이를 아주 천천히, 그다음 빠르게 해 보세요. 멈췄다가 아이 눈을 보며 기다려 주세요.` });
+  return {
+    title,
+    goals: goalObjs,
+    materials,
+    setup: ["아이와 마주 앉아, 놀잇감은 엄마 쪽에 두세요.", "텔레비전이나 다른 장난감은 잠깐 치워 주세요."],
+    scenes,
+    variations: variations.slice(0, 2),
+    songs,
+    closing,
+    home_tips: [
+      `밥 먹기 전이나 목욕 뒤처럼 정해진 때에 ${main} 놀이를 5분씩 해 보세요.`,
+      `아이가 손을 뻗으면 바로 주지 말고 3~5초 기다려 소리나 말을 기다려 주세요.`,
+      "잘했을 때 ‘우와!’ 하고 크게 반응해 주시면 아이가 더 자주 해 보려고 합니다.",
+    ],
+    watch: PLAY_LEVEL_WATCH[lv].split("{N}").join(N),
+    center_link: "",
+    reason: EVIDENCE.play.mom,
+    when_to_do: ["밥 먹기 전이나 목욕 뒤처럼 매일 같은 때에 5분만 해 주세요.", "아이가 심심해할 때 엄마가 먼저 놀잇감을 꺼내 보여 주세요."],
+    say: [],
+    troubles: [
+      { when: "놀이에 관심이 없을 때", do: "억지로 앉히지 말고 엄마 혼자 재미있게 놀며 소리를 크게 내 보세요. 아이가 쳐다보면 그때 놀잇감을 건네 주세요." },
+      { when: "혼자서만 가지고 놀 때", do: "놀잇감 하나를 엄마가 쥐고 있다가, 아이가 쳐다보거나 손을 내밀 때 건네 주세요. 주고받는 틈이 생깁니다." },
+      { when: "너무 쉬워할 때", do: "기다리는 시간을 조금 늘리거나, 들려주는 말에 낱말 하나를 더 붙여 주세요(예: ‘공’ → ‘공 줘’)." },
+    ],
+    teacher_note: "미리 쓴 문구로 만든 자료입니다. 장면의 선생님용 설명을 보고 아이에게 맞게 다듬어 주세요.",
+  };
+  function M2(w) { return w + (jong(w) ? "을" : "를"); }
+}
+
+function splitSteps(practice) {
+  return String(practice || "")
+    .split(/\n\n(?=\d단계)/)
+    .map((p) => p.replace(/^[\s\S]*?(?=\d단계)/, ""))
+    .filter((p) => /^\d단계/.test(p))
+    .map((p) => p.replace(/^\d단계\s*(\(\d분\))?\s*[—-]\s*/, "").replace(/\n→\s*/g, " ").trim());
+}
+
+// 미리 쓴 주제 문구가 그 기술과 딱 맞는 것만 쓴다(예: '세수'에 손 씻기 문구가 들어가지 않게)
+const SKILL_TOPIC_OK = ["숟가락·포크", "소변 가리기", "대변 가리기", "기저귀 떼기", "손 씻기", "양치", "옷 입고 벗기", "신발 신기"];
+function localSkill({ given, skill, level }, seed = 0) {
+  const custom = !SKILL_TOPIC_OK.includes(skill);
+  const g = buildLocalGuide(skill, { id: "skill" }, given, "", "selfcare", seed, level || "mid", "", custom);
+  const steps = splitSteps(g.practice);
+  return {
+    title: skill,
+    why: g.function_analysis.replace(/^이번에는 문제 행동이 아니라 새로 배우는 기술로 보고 있습니다\.\s*/, ""),
+    goal: g.goal,
+    materials: g.materials.replace(/\n\n/g, " "),
+    steps: steps.length >= 3 ? steps.slice(0, 3) : [...steps, "한 부분이라도 스스로 하면 바로 알아봐 주세요."].slice(0, 3),
+    waiting: g.waiting,
+    praise: g.reinforcement.replace(/\n\n/g, " "),
+    if_refuses: "많이 싫어하면 억지로 하지 마세요. 아주 작은 한 부분만 함께 하고 끝내셔도 됩니다.",
+    check_label: g.weekly_focus,
+    next: g.next_priority,
+    teacher_note: "미리 쓴 문구로 만든 자료입니다. 아이의 현재 단계에 맞는지 확인해 주세요.",
+    center_link: "",
+    reason: EVIDENCE.skill.mom,
+    say: [`‘${skill} 하자’`, "‘같이 해 볼까?’", "‘혼자 했네!’"],
+    when_to_do: ["그 일을 실제로 하는 때(예: 양치는 자기 전, 손 씻기는 밥 먹기 전)에 연습해 주세요.", "하루 한두 번이면 충분합니다. 바쁜 아침보다 여유 있는 때를 골라 주세요."],
+    troubles: [
+      { when: "안 하려고 할 때", do: "억지로 시키지 말고 마지막 한 동작만 함께 하고 끝내 주세요. 짧게 끝나야 다음에도 시작하기 쉽습니다." },
+      { when: "울거나 짜증 낼 때", do: "길게 달래거나 혼내지 말고 차분히 기다려 주세요. 잠잠해지면 아주 쉬운 한 동작만 하고 칭찬하며 끝냅니다." },
+      { when: "너무 쉬워할 때", do: "도와주는 손을 조금 더 빼고, 아이가 스스로 하는 단계를 하나 늘려 주세요." },
+    ],
+  };
+}
+
+const PREVENT = {
+  attention: ["어머님이 바쁜 일을 하기 전에 먼저 다가가 짧게 놀아 주세요.", "‘엄마’ 부르기나 어깨 두드리기처럼 부르는 방법을 미리 보여 주세요."],
+  escape: ["할 일을 평소보다 짧고 쉽게 줄여서 시작해 주세요.", "‘그만’이나 ‘쉬고 싶어요’ 카드를 손 닿는 곳에 두세요."],
+  tangible: ["끝내기 전에 ‘세 번 더 하고 끝’처럼 미리 알려 주세요.", "원하는 것을 말이나 카드로 알리는 방법을 평소에 자주 보여 주세요."],
+  sensory: ["그 행동과 비슷한 느낌을 주는 놀잇감을 가까이 두세요.", "피곤하거나 주변이 시끄러울 때 늘어나는지 살펴보고, 그런 때는 조용한 곳으로 옮겨 주세요."],
+  unknown: ["이번 주는 행동을 바꾸기보다 언제 나오는지 살펴보는 데 집중해 주세요.", "기록할 메모지나 휴대폰 메모를 미리 준비해 두세요."],
+};
+const ALT_DEFAULT = {
+  attention: "‘엄마’ 부르거나 어깨 두드리기",
+  escape: "‘그만’ 말하거나 카드 짚기",
+  tangible: "원하는 것을 말이나 카드로 알리기",
+  sensory: "비슷한 느낌의 다른 놀이 하기",
+  unknown: "(관찰 후 정합니다)",
+};
+
+const BURST = "처음 며칠은 아이가 ‘왜 안 통하지?’ 하고 더 세게 할 수 있습니다. 이때 다시 들어주면 더 센 행동을 배우게 되니, 다칠 위험이 없다면 같은 방법을 꾸준히 지켜 주세요. 심하거나 다칠 것 같으면 센터에 바로 알려 주세요.";
+const ALT_HELP = "행동이 잠잠해진 뒤나 평소 편안할 때, 엄마가 먼저 대신할 행동을 보여 주고 손을 살짝 받쳐 함께 해 주세요. 아이가 손을 빼면 잡지 말고 보여 주기만 하셔도 됩니다. 하면 바로 반응해 주세요.";
+const OUTSIDE = "집에서와 같은 말과 방법을 써 주세요. 다칠 위험이 있으면 주변의 위험한 물건부터 치우고, 사람들 눈 때문에 바로 들어주지 않도록 미리 마음을 정해 두시면 좋습니다.";
+const TROUBLE_DO = {
+  attention: [BURST, ALT_HELP, OUTSIDE],
+  escape: [BURST, ALT_HELP, OUTSIDE],
+  tangible: [BURST, ALT_HELP, OUTSIDE],
+  sensory: ["다칠 위험이 있으면 손이나 쿠션으로 먼저 막아 주세요. 그렇지 않으면 억지로 멈추게 하지 말고, 비슷한 느낌의 놀이를 눈앞에 보여 주며 함께 해 보세요. 피곤하거나 시끄러운 때라면 조용한 곳으로 함께 가 주세요.", ALT_HELP, "밖에서는 주머니에 넣을 수 있는 작은 놀잇감(누르기·만지기 장난감 등)을 챙겨 비슷한 느낌을 대신 채워 주세요."],
+  unknown: ["하루에 한 번만 적어도 괜찮습니다. 휴대폰 메모에 ‘언제·무슨 행동·그 다음’ 세 가지만 짧게 남겨 주세요.", "이번 주는 대신할 행동보다 기록이 먼저입니다. 무리하게 가르치지 않으셔도 됩니다.", "밖에서 있었던 일도 같은 방법으로 적어 주세요. 장소가 다르면 이유가 다를 수 있어 중요한 기록이 됩니다."],
+};
+const SAY_BY_FN = {
+  attention: ["(행동이 없을 때 미리) ‘엄마 하고 불러 줘’", "(불렀을 때) ‘응, 불렀구나!’"],
+  escape: ["‘힘들면 그만이라고 말해’", "(말하면) ‘그래, 잠깐 쉬자’", "(시작하기 전에) ‘하나만 하고 쉬자’"],
+  tangible: ["‘줘 하고 말해 줘’", "(말하면) ‘여기 있어!’", "‘세 번 하고 끝’"],
+  sensory: ["‘이거 해 볼까?’", "‘같이 하자’"],
+  unknown: ["(행동이 나오면) 짧고 차분하게 ‘괜찮아’", "(잠잠해지면) ‘이제 하던 거 하자’"],
+};
+
+function localBehavior({ given, behaviorLabel, situation, fn, level, alt, danger }, seed = 0) {
+  const fnId = fn === "unknown" ? "other" : fn;
+  const topic = situation || behaviorLabel;
+  // 상황 글에 '양치' 같은 낱말이 있어도 기술 문구가 끼어들지 않게, 문구는 행동 이름으로 고른다
+  const listed = BEHAVIORS.some((b) => b.label === behaviorLabel);
+  const g = buildLocalGuide(behaviorLabel, { id: fnId }, given, "", "behavior", seed, level || "mid", alt || "", !listed);
+  let when = g.waiting;
+  if (danger && !/^다칠 위험이 있으면/.test(when)) when = "다칠 위험이 있으면 기다리지 말고 먼저 막아 주세요. " + when.replace(/\s*다만 때리기·자해·던지기처럼 다칠 수 있는 행동이면 기다리지 말고 먼저 막아 주세요\.?/, "");
+  const steps = splitSteps(g.practice);
+  return {
+    title: topic,
+    why: g.function_analysis,
+    prevent: PREVENT[fn] || PREVENT.unknown,
+    when_happens: when,
+    alt: alt || ALT_DEFAULT[fn] || ALT_DEFAULT.unknown,
+    teach: steps.length >= 3 ? steps.slice(0, 3) : [...steps, "대신할 행동이 나오면 바로 반응해 주세요."].slice(0, 3),
+    praise: g.reinforcement.replace(/\n\n/g, " "),
+    check_behavior: `${behaviorLabel} 횟수`,
+    check_alt: fn === "unknown" ? "기록을 남긴 횟수" : g.weekly_focus,
+    next: g.next_priority,
+    teacher_note: "미리 쓴 문구로 만든 자료입니다. 기능과 단계가 맞는지 확인해 주세요.",
+    center_link: "",
+    reason: (EVIDENCE[fn] || EVIDENCE.unknown).mom,
+    say: SAY_BY_FN[fn] || SAY_BY_FN.unknown,
+    when_to_do: [
+      situation ? `행동이 자주 나오는 때(${situation})가 오기 전에 미리 준비해 주세요.` : "행동이 자주 나오는 때가 오기 전에 미리 준비해 주세요.",
+      "대신할 행동은 행동이 나오지 않는 편안한 때에 짧게 미리 연습해 두면 실제 상황에서 쓰기 쉽습니다.",
+    ],
+    troubles: troubleLabels("behavior", fn).map((lb, i) => ({ when: lb, do: (TROUBLE_DO[fn] || TROUBLE_DO.unknown)[i] })),
+  };
+}
+
+// ─────────────────────────────────────────────
+// 카톡용 글
+// ─────────────────────────────────────────────
+function toText(r, view) {
+  const d = r.data || {};
+  const T = view === "teacher";
+  const L = [];
+  const call = r.input?.call || "아이";
+  L.push(`[검단ABA · 집에서 하는 5분] ${d.title || ""}`);
+  L.push(INTRO(call));
+  L.push("");
+  const sec = (h) => { L.push(""); L.push(`■ ${h}`); };
+  const ev = evidenceFor(r);
+  const common = () => {
+    if ((d.say || []).length) { sec("이렇게 말해 주세요"); d.say.forEach((s) => L.push(`· ${s}`)); }
+    if ((d.when_to_do || []).length) { sec("하루 중 언제"); d.when_to_do.forEach((s) => L.push(`· ${s}`)); }
+    if ((d.troubles || []).length) { sec("이럴 땐 이렇게"); d.troubles.forEach((t) => L.push(`· ${t.when}: ${t.do}`)); }
+  };
+  const center = () => { if (String(d.center_link || "").trim()) { sec("센터에서 본 모습"); L.push(d.center_link); } };
+  const why = () => { if (ev) { sec("이 방법을 쓰는 이유"); L.push(d.reason || ev.mom); if (T) L.push(`(선생님용 근거) ${ev.teacher}`); } };
+  if (r.branch === "play") {
+    center();
+    sec("이번 주 목표");
+    (d.goals || []).forEach((g) => L.push(`· ${g.label}: ${g.detail}`));
+    sec("준비");
+    L.push(`준비물: ${d.materials}`);
+    (d.setup || []).forEach((s) => L.push(`· ${s}`));
+    sec("함께 놀기");
+    (d.scenes || []).forEach((s, i) => {
+      L.push(`${i + 1}. ${s.label}`);
+      L.push(`   ${s.parent}`);
+      if (T && s.teacher) L.push(`   (선생님) ${s.teacher}`);
+    });
+    sec("다르게 놀기");
+    (d.variations || []).forEach((v) => L.push(`· ${v.title}: ${v.detail}`));
+    if ((d.songs || []).length) { sec("노래로"); d.songs.forEach((s) => L.push(`· ${s}`)); }
+    sec("마무리");
+    (d.closing || []).forEach((c, i) => L.push(`${i + 1}. ${c}`));
+    sec("집에서 이어가기");
+    (d.home_tips || []).forEach((t) => L.push(`· ${t}`));
+    L.push(`좋은 신호: ${d.watch}`);
+    common();
+    why();
+  } else if (r.branch === "skill") {
+    center();
+    sec("왜 어려울까요"); L.push(d.why);
+    sec("이번 주 목표"); L.push(d.goal);
+    sec("준비물"); L.push(d.materials);
+    sec("이렇게 해 주세요"); (d.steps || []).forEach((s, i) => L.push(`${i + 1}단계. ${s}`));
+    sec("기다려 주세요"); L.push(d.waiting);
+    sec("칭찬은 이때"); L.push(d.praise);
+    sec("싫어할 때는"); L.push(d.if_refuses);
+    common();
+    sec("이번 주 체크"); L.push(`${d.check_label}: 월(  ) 화(  ) 수(  ) 목(  ) 금(  ) 토(  ) 일(  )`);
+    sec("다음 주에는"); L.push(d.next); L.push(NEXT_NOTE);
+    why();
+  } else {
+    if (r.input?.danger) { sec(SAFETY_TITLE); safetyLinesFor(r.input).forEach((s) => L.push(`· ${s}`)); }
+    center();
+    sec("왜 그럴까요"); L.push(d.why);
+    sec("미리 막기"); (d.prevent || []).forEach((s) => L.push(`· ${s}`));
+    sec("행동이 나오면"); L.push(d.when_happens);
+    sec(`대신할 행동 가르치기 — ${d.alt}`); (d.teach || []).forEach((s, i) => L.push(`${i + 1}단계. ${s}`));
+    sec("칭찬은 이때"); L.push(d.praise);
+    common();
+    sec("이번 주 체크");
+    L.push(`${d.check_behavior}: 월(  ) 화(  ) 수(  ) 목(  ) 금(  ) 토(  ) 일(  )`);
+    L.push(`${d.check_alt}: 월(  ) 화(  ) 수(  ) 목(  ) 금(  ) 토(  ) 일(  )`);
+    sec("다음 주에는"); L.push(d.next); L.push(NEXT_NOTE);
+    why();
   }
-  const initial = [{ ...DEFAULT_ADMIN, createdAt: Date.now() }];
-  safeSetLS(STORAGE_KEY_USERS, JSON.stringify(initial));
-  return initial;
+  if (T && d.teacher_note) { sec("선생님용 메모"); L.push(d.teacher_note); }
+  L.push("");
+  L.push("© 검단ABA언어행동연구소 | 민다혜 (BCBA)");
+  return L.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
-function saveUsers(users) {
-  // localStorage 폴백 전용 (Supabase 모드에서는 개별 DB 함수 사용)
-  safeSetLS(STORAGE_KEY_USERS, JSON.stringify(users));
+// 예전에 저장한 함께놀이(JAR) 계획을 새 모양으로 바꿔 보여 준다
+function jarToPlay(p) {
+  const th = p.theme || {};
+  return {
+    title: th.name || p.title || "놀이",
+    goals: (p.goals || []).slice(0, 2).map((g) => ({ label: g.domain || g.label || "", detail: g.detail || "" })),
+    materials: p.setup?.materials || "",
+    setup: [...(p.setup?.arrangement || []), ...(p.setup?.approach || [])],
+    scenes: (th.scenes || []).map((s) => ({ label: String(s.label || "").replace(/^장면\s*\d+:\s*/, ""), parent: s.parent || "", teacher: s.strategy || "" })),
+    variations: (p.variations || []).map((v) => ({ title: String(v.title || "").replace(/^변형\d+\]\s*/, ""), detail: v.detail || "" })),
+    songs: th.songs || [],
+    closing: th.closing || [],
+    home_tips: p.home?.tips || [],
+    watch: p.home?.watch || "",
+    teacher_note: p.home?.summary || "",
+  };
 }
 
-// 로그인: 이메일/비번 Auth 검증 후 세션 저장
-async function authenticate(id, password) {
-  const email = (id || '').trim();
-  if (!email) return { ok: false, error: '이메일을 입력해주세요' };
+  return { BRANCHES, BRANCH_LABEL, PLAY_GOALS, SKILL_GROUPS, BEHAVIORS, FNS, FN_LABEL, LEVEL3, LEVEL3_HINT, LEVEL3_LABEL, SAFETY_TITLE, SAFETY_LINES, EVIDENCE, EVIDENCE_NOTE, evidenceFor, NEXT_NOTE, troubleLabels, safetyLinesFor, INTRO, JARGON, momStrings, appCheck, cleanData, localPlay, localSkill, localBehavior, toText, jarToPlay };
+})();
+const { BRANCHES, BRANCH_LABEL, PLAY_GOALS, SKILL_GROUPS, BEHAVIORS, FNS, FN_LABEL, LEVEL3, LEVEL3_HINT, LEVEL3_LABEL, SAFETY_TITLE, SAFETY_LINES, EVIDENCE, EVIDENCE_NOTE, evidenceFor, NEXT_NOTE, troubleLabels, safetyLinesFor, INTRO, JARGON, momStrings, appCheck, cleanData, localPlay, localSkill, localBehavior, toText, jarToPlay } = HomeLib;
 
-  if (supabaseConfigured()) {
-    const result = await authSignIn(email, password);
-    if (!result.ok) return { ok: false, error: result.error };
-    // session.id 는 Auth UUID → owner_id 로 사용됨
-    const session = {
-      id: result.user.id,
-      name: result.user.name,
-      role: result.user.role,
-      email: result.user.email,
-      loginAt: Date.now(),
-    };
-    safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(session));
-    return { ok: true, user: session };
-  }
+// ============================================================
+// 가정 자료 (예전 이름: 함께놀이 플래너 ESDM JAR)
+// Joint Activity Routine · 공동활동루틴 플래너
+//
+// 배포(GitHub Pages) 시 변경할 곳: generateJAR() 안의 fetch URL.
+//  - Artifact(미리보기): https://api.anthropic.com/v1/messages  직접 호출
+//  - 배포본: Supabase Edge Function 릴레이 URL 로 교체 + API 키는 함수 안에 보관
+// ============================================================
 
-  // ── localStorage 폴백 (평문 비교) ──
-  const users = await loadUsers();
-  const user = users.find(u => u.id === email);
-  if (!user) return { ok: false, error: '존재하지 않는 계정입니다' };
-  if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다' };
-  const session = { id: user.id, name: user.name, role: user.role, loginAt: Date.now() };
-  safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(session));
-  return { ok: true, user: session };
-}
+const ACCESS_CODE = "esdm"; // 배포 시 원하는 코드로 변경
 
-// 현재 세션 가져오기 (세션 자체는 기기 로컬에 보관 — 로그인 상태 유지용)
-// ★ [도구 연결] 통합본(원장님 화면)에서 '🏠 5분 가이드'로 열었을 때 넘겨받은 아이 번호·이름
-//   - 주소에는 아이 번호만(?aba_child=...), 이름은 같은 사이트 저장칸에 잠깐 맡겨 둔 것을 한 번 읽고 지운다.
-//   - 이 창 안에서는 새로고침해도 유지(sessionStorage). 관리자 계정일 때만 화면에 쓰인다.
-const ABA_HANDOFF_KEY = 'aba-guide-handoff';
-const ABA_LINK_KEY = 'aba-guide-link';
-function readAbaLink() {
+// 놀이계획 생성: 기본은 템플릿. 놀잇감 2개+ 조합에서 "AI로 엮기" 옵션을 켠 경우에만 AI 사용.
+// DEMO_MODE=false 여야 AI가 실제로 호출됨 (크레딧·API 키 연결 후). 단독 놀잇감은 항상 템플릿.
+// AI 실패(크레딧 소진·502 등) 시 자동으로 템플릿으로 대체되므로 빈 화면은 나오지 않음.
+const DEMO_MODE = false;
+
+// =====================================================================
+// Supabase 연결 설정 (A방식: Supabase Auth + RLS + Edge Function)
+// =====================================================================
+const SUPABASE_URL = "https://vdubgrxwijydwfabwpnk.supabase.co";
+// Supabase anon key (공개 가능 키)
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkdWJncnh3aWp5ZHdmYWJ3cG5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDk1ODgsImV4cCI6MjA5NzE4NTU4OH0.nqNO3vany3M6fzmG5BG6QVdvi8BW2UbhTDhxNnwvA88";
+
+// AI 놀이계획 생성 전용 릴레이 (공용 claude-relay — BIP 등과 동일)
+const RELAY_URL = `${SUPABASE_URL}/functions/v1/claude-relay`;
+// ESDM 전용 릴레이: 프롬프트 조립을 서버(Edge Function)에서 수행.
+// 앱은 재료(levels/toys/domains/childName/childAge)만 보내고, 프롬프트는 서버에만 존재.
+const ESDM_RELAY_URL = `${SUPABASE_URL}/functions/v1/esdm-relay`;
+// 가정 자료 AI (규칙은 서버 home-ai 안에만 있다. 앱은 재료만 보낸다)
+const HOME_AI_URL = `${SUPABASE_URL}/functions/v1/home-ai`;
+
+// =====================================================================
+// Auth 세션 관리 (Supabase Auth) — SCERTS v2 패턴
+// =====================================================================
+const AUTH_SESSION_KEY = "sb-auth-session";
+
+function getStoredSession() {
   try {
-    const params = new URLSearchParams(window.location.search);
-    const cid = params.get('aba_child');
-    let link = null;
-    if (cid) {
-      try {
-        const h = JSON.parse(localStorage.getItem(ABA_HANDOFF_KEY) || 'null');
-        if (h && h.cid === cid && Date.now() - (h.ts || 0) < 30 * 60 * 1000) link = { cid, name: String(h.name || '') };
-      } catch (e) {}
-      try { localStorage.removeItem(ABA_HANDOFF_KEY); } catch (e) {}
-      if (link) { try { sessionStorage.setItem(ABA_LINK_KEY, JSON.stringify(link)); } catch (e) {} }
-      try { params.delete('aba_child'); const q = params.toString(); window.history.replaceState(null, '', window.location.pathname + (q ? '?' + q : '') + window.location.hash); } catch (e) {}
-      if (link) return link;
+    const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (s.expires_at && s.expires_at * 1000 < Date.now() + 5 * 60 * 1000) {
+      return null; // 만료됨 (refresh 필요)
     }
-    const saved = JSON.parse(sessionStorage.getItem(ABA_LINK_KEY) || 'null');
-    return saved && saved.cid ? saved : null;
-  } catch (e) { return null; }
-}
-function clearAbaLink() {
-  try { sessionStorage.removeItem(ABA_LINK_KEY); } catch (e) {}
-}
-// 한글 3글자 이상이면 첫 글자(성)를 뗀다 (함께놀이 앱과 같은 규칙)
-function abaGivenName(full) {
-  const n = (full || '').trim();
-  if (/^[가-힣]+$/.test(n) && n.length >= 3) return n.slice(1);
-  return n;
-}
-
-async function loadSession() {
-  const raw = safeGetSession(STORAGE_KEY_SESSION);
-  if (!raw) return null;
-  try {
-    const session = JSON.parse(raw);
-    if (!session || !session.id) return null;
-    // Auth 세션이 실제로 유효한지 확인
-    if (supabaseConfigured()) {
-      try {
-        const u = await authCurrentUser();
-        if (!u) { safeRemoveSession(STORAGE_KEY_SESSION); return null; }
-        // 최신 정보로 세션 갱신 (id=UUID, role, name)
-        const fresh = { id: u.id, name: u.name, role: u.role, email: u.email, loginAt: session.loginAt || Date.now() };
-        safeSetSession(STORAGE_KEY_SESSION, JSON.stringify(fresh));
-        return fresh;
-      } catch (e) {
-        // 서버 확인 실패 시 세션 제거 (Auth는 오프라인 유지 안 함)
-        safeRemoveSession(STORAGE_KEY_SESSION);
-        return null;
-      }
-    }
-    const users = await loadUsers();
-    const stillExists = users.find(u => u.id === session.id);
-    if (!stillExists) { safeRemoveSession(STORAGE_KEY_SESSION); return null; }
-    return session;
+    return s;
   } catch (e) {
     return null;
   }
 }
 
-function logout() {
-  safeRemoveSession(STORAGE_KEY_SESSION);
-  // Auth 세션도 정리 (비동기, 실패해도 무방)
-  try { authSignOut(); } catch (e) {}
-}
-
-// 선생님 계정 추가 (이메일 방식)
-async function createTeacher(id, name, password) {
-  const email = (id || '').trim();
-  let tName = (name || '').trim();
-  if (!email) return { ok: false, error: '이메일을 입력해주세요' };
-  if (!email.includes('@')) return { ok: false, error: '올바른 이메일 형식을 입력해주세요' };
-  if (!password || password.length < 6) return { ok: false, error: '비밀번호는 6자 이상' };
-  // 이름을 비우면 이메일 앞부분을 이름으로 사용
-  if (!tName) tName = email.split('@')[0];
-
-  if (supabaseConfigured()) {
-    try {
-      const u = await dbCreateUser({ email, id: email, name: tName, role: 'teacher', password });
-      return { ok: true, user: u };
-    } catch (e) {
-      return { ok: false, error: e.message || '계정 생성 실패' };
-    }
-  }
-
-  const users = await loadUsers();
-  if (users.find(u => u.id === email)) return { ok: false, error: '이미 존재하는 계정입니다' };
-  const newUser = { id: email, name: tName, password, role: 'teacher', createdAt: Date.now() };
-  users.push(newUser);
-  saveUsers(users);
-  return { ok: true, user: newUser };
-}
-
-// 선생님 삭제
-const ADMIN_UUID = 'aecb8a9c-000e-4ad5-9805-83450e9bc585';
-async function deleteTeacher(userId, userRole) {
-  if (userId === ADMIN_UUID || userRole === 'admin') {
-    return { ok: false, error: '관리자는 삭제할 수 없습니다' };
-  }
-  if (supabaseConfigured()) {
-    try {
-      await dbDeleteUser(userId); // 가이드/즐겨찾기는 FK on delete cascade로 함께 삭제
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e.message || '삭제 실패' };
-    }
-  }
-  const users = (await loadUsers()).filter(u => u.id !== userId);
-  saveUsers(users);
-  safeRemoveLS(favoritesKey(userId));
-  safeRemoveLS(historyKey(userId));
-  return { ok: true };
-}
-
-// 비밀번호 변경
-async function changePassword(userId, newPassword) {
-  if (!newPassword || newPassword.length < 6) return { ok: false, error: '비밀번호는 6자 이상' };
-  if (supabaseConfigured()) {
-    try {
-      await dbUpdatePassword(userId, newPassword);
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e.message || '비밀번호 변경 실패' };
-    }
-  }
-  const users = await loadUsers();
-  const idx = users.findIndex(u => u.id === userId);
-  if (idx === -1) return { ok: false, error: '사용자를 찾을 수 없습니다' };
-  users[idx].password = newPassword;
-  saveUsers(users);
-  return { ok: true };
-}
-
-// 특정 사용자의 history 불러오기 (관리자가 다른 선생님 보관함 조회 시)
-async function loadUserHistory(userId) {
-  if (supabaseConfigured()) {
-    try {
-      const rows = await dbListGuides(userId);
-      return rows.map(r => ({ ...r.payload, guide_id: r.guide_id, createdAt: r.created_at }));
-    } catch (e) { return []; }
-  }
-  const raw = safeGetLS(historyKey(userId));
-  if (!raw) return [];
+function saveSession(session) {
   try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { return []; }
+    if (session) sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(AUTH_SESSION_KEY);
+    localStorage.removeItem(AUTH_SESSION_KEY);
+  } catch (e) {}
 }
 
-const WEEK_DAYS = ['월', '화', '수', '목', '금', '토', '일'];
-
-// 내용에 따라 높이 자동 조절되는 textarea (컴포넌트 외부에 정의 - 리렌더링 시 포커스 유지)
-function AutoTextarea({ value, onChange, style, minRows = 2 }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = 'auto';
-      ref.current.style.height = Math.max(ref.current.scrollHeight, minRows * 24) + 'px';
-    }
-  }, [value, minRows]);
-  return (
-    <textarea
-      ref={ref}
-      value={value}
-      onChange={onChange}
-      style={{ ...style, overflow: 'hidden', resize: 'none' }}
-    />
-  );
-}
-
-// ───────────────────────────────────────
-// 로그인 화면
-// ───────────────────────────────────────
-function LoginView({ onLogin }) {
-  const [id, setId] = useState('');
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // 첫 마운트 시 admin 자동 생성 보장
-  useEffect(() => { loadUsers(); }, []);
-
-  const submit = async () => {
-    if (loading) return;
-    setErr('');
-    setLoading(true);
-    try {
-      const result = await authenticate(id, pw);
-      if (!result.ok) {
-        setErr(result.error);
-        setLoading(false);
-        return;
-      }
-      onLogin(result.user);
-    } catch (e) {
-      setErr('로그인 중 오류가 발생했습니다.');
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={loginStyles.container}>
-      <div style={loginStyles.card}>
-        <div style={loginStyles.brand}>
-          <div style={loginStyles.brandName}>검단ABA언어행동연구소</div>
-          <div style={loginStyles.brandSub}>ABA 기반 가정 연계 5분 가이드</div>
-        </div>
-
-        {/* 브라우저 자동완성 차단용 미끼 필드 (화면에 보이지 않음) */}
-        <input type="text" name="username" tabIndex={-1} aria-hidden="true" autoComplete="username" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, pointerEvents: 'none', zIndex: -1 }} />
-        <input type="password" name="password" tabIndex={-1} aria-hidden="true" autoComplete="current-password" style={{ position: 'absolute', opacity: 0, height: 0, width: 0, pointerEvents: 'none', zIndex: -1 }} />
-
-        <div style={loginStyles.field}>
-          <label style={loginStyles.label}>이메일</label>
-          <input
-            type="email"
-            value={id}
-            onChange={(e) => setId(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-            placeholder="이메일 주소"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck="false"
-            autoComplete="off"
-            name="gd-login-id"
-            style={loginStyles.input}
-          />
-        </div>
-
-        <div style={loginStyles.field}>
-          <label style={loginStyles.label}>비밀번호</label>
-          <input
-            type="password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-            placeholder="비밀번호"
-            autoComplete="new-password"
-            name="gd-login-pw"
-            style={loginStyles.input}
-          />
-        </div>
-
-        {err && <div style={loginStyles.error}>{err}</div>}
-
-        <button onClick={submit} disabled={loading} style={loginStyles.submitBtn}>
-          {loading ? '로그인 중...' : '로그인'}
-        </button>
-
-        <div style={loginStyles.hint}>
-          본인 이메일과 비밀번호로 로그인하세요.<br />
-          계정이 없으시면 원장님께 문의해 주세요.
-        </div>
-
-        <div style={loginStyles.copyright}>
-          © 검단ABA 언어행동연구소 · 민다혜 (BCBA)<br />
-          본 자료는 검단ABA언어행동연구소의 지적재산입니다.<br />
-          무단 복제·배포·재판매·온라인 게시를 엄격히 금지합니다.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ───────────────────────────────────────
-// 가이드 템플릿 관리 (관리자)
-// 기능 × 영역 조합별로 9개 필드 문구를 직접 편집·저장
-// ───────────────────────────────────────
-const TEMPLATE_FIELD_LABELS = [
-  { key: 'function_analysis', label: '예상 기능 살펴보기' },
-  { key: 'goal', label: '이번 주 목표' },
-  { key: 'materials', label: '준비물' },
-  { key: 'practice', label: '5분 실천법' },
-  { key: 'waiting', label: '기다림의 포인트' },
-  { key: 'reinforcement', label: '강화(칭찬) 타이밍' },
-  { key: 'weekly_focus', label: '이번 주 집중 관찰' },
-  { key: 'next_priority', label: '다음 주 우선순위' },
-];
-
-// 기능id+영역id 로 기본(빌트인) 문구를 계산: 영역 > 기능 순
-function getBuiltinTemplate(fnId, domId) {
-  const baseFn = GUIDE_TEMPLATES[fnId] || GUIDE_TEMPLATES.other;
-  const domFields = DOMAIN_FIELDS[domId] || {};
-  const out = {};
-  TEMPLATE_FIELD_LABELS.forEach(({ key }) => {
-    out[key] = domFields[key] || baseFn[key] || '';
-  });
-  return out;
-}
-
-function TemplateAdminView({ onClose, onLogout }) {
-  const [fnId, setFnId] = useState(FUNCTIONS[0].id);
-  const [domId, setDomId] = useState(DOMAINS[0].id);
-  const [draft, setDraft] = useState({});
-  const [custom, setCustom] = useState({});
-  const [savedFlash, setSavedFlash] = useState(false);
-
-  const keyOf = (f, d) => `${f}__${d}`;
-
-  // 선택이 바뀌면 draft 를 (커스텀 있으면 커스텀, 없으면 빌트인)으로 채움
-  useEffect(() => {
-    (async () => {
-      const all = await refreshCustomTemplates();
-      setCustom(all || {});
-    })();
-  }, []);
-
-  useEffect(() => {
-    const k = keyOf(fnId, domId);
-    const builtin = getBuiltinTemplate(fnId, domId);
-    const saved = custom[k];
-    const next = {};
-    TEMPLATE_FIELD_LABELS.forEach(({ key }) => {
-      next[key] = (saved && saved[key] != null) ? saved[key] : builtin[key];
+async function refreshSession(refreshToken) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: refreshToken }),
     });
-    setDraft(next);
-  }, [fnId, domId, custom]);
-
-  const isCustomized = !!custom[keyOf(fnId, domId)];
-
-  const handleSave = async () => {
-    const k = keyOf(fnId, domId);
-    const next = { ...custom, [k]: { ...draft } };
-    setCustom(next);
-    await saveCustomTemplates(next);
-    setSavedFlash(true);
-    setTimeout(() => setSavedFlash(false), 1500);
-  };
-
-  const handleReset = async () => {
-    const k = keyOf(fnId, domId);
-    const next = { ...custom };
-    delete next[k];
-    setCustom(next);
-    await saveCustomTemplates(next);
-    // draft 는 useEffect 가 빌트인으로 다시 채움
-  };
-
-  const fnObj = FUNCTIONS.find(f => f.id === fnId);
-  const domObj = DOMAINS.find(d => d.id === domId);
-  const customizedCount = Object.keys(custom).length;
-
-  return (
-    <div style={loginStyles.container}>
-      <div style={adminStyles.wrapper}>
-        <div style={adminStyles.header}>
-          <div>
-            <div style={adminStyles.title}>가이드 템플릿 관리</div>
-            <div style={adminStyles.subtitle}>
-              기능 × 영역별 문구를 직접 수정 · 저장 {customizedCount > 0 ? `· 수정된 조합 ${customizedCount}개` : ''}
-            </div>
-          </div>
-          <div style={adminStyles.headerActions}>
-            <button onClick={onClose} style={adminStyles.backBtn}>← 관리자 페이지로</button>
-            <button onClick={onLogout} style={adminStyles.logoutBtn}>로그아웃</button>
-          </div>
-        </div>
-
-        <div style={adminStyles.section}>
-          <div style={tplStyles.note}>
-            아래에서 <strong>행동 기능</strong>과 <strong>연습 영역</strong>을 고른 뒤 문구를 수정하면, 그 조합으로 가이드를 만들 때 이 문구가 쓰입니다.
-            <br />
-            <code style={tplStyles.code}>{'{name}'}</code> 아이 이름, <code style={tplStyles.code}>{'{name_ga}'}</code> 이름+이/가, <code style={tplStyles.code}>{'{name_neun}'}</code> 이름+은/는, <code style={tplStyles.code}>{'{topic}'}</code> 주제 로 자동 치환됩니다.
-          </div>
-
-          <div style={tplStyles.selectRow}>
-            <div style={tplStyles.selectGroup}>
-              <label style={tplStyles.selectLabel}>행동 기능</label>
-              <select value={fnId} onChange={(e) => setFnId(e.target.value)} style={styles.domainSelect}>
-                {FUNCTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-            </div>
-            <div style={tplStyles.selectGroup}>
-              <label style={tplStyles.selectLabel}>연습 영역</label>
-              <select value={domId} onChange={(e) => setDomId(e.target.value)} style={styles.domainSelect}>
-                {DOMAINS.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div style={tplStyles.statusRow}>
-            <span style={tplStyles.comboTag}>{fnObj?.label} × {domObj?.label}</span>
-            {isCustomized
-              ? <span style={tplStyles.customBadge}>수정됨</span>
-              : <span style={tplStyles.builtinBadge}>기본값</span>}
-          </div>
-
-          {TEMPLATE_FIELD_LABELS.map(({ key, label }) => (
-            <div key={key} style={tplStyles.fieldBlock}>
-              <label style={tplStyles.fieldLabel}>{label}</label>
-              <AutoTextarea
-                value={draft[key] || ''}
-                onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
-                style={tplStyles.fieldTextarea}
-                minRows={2}
-              />
-            </div>
-          ))}
-
-          <div style={tplStyles.actionRow}>
-            <button onClick={handleSave} style={tplStyles.saveBtn}>
-              {savedFlash ? '저장되었습니다' : '이 조합 저장'}
-            </button>
-            {isCustomized && (
-              <button onClick={handleReset} style={tplStyles.resetBtn}>기본값으로 되돌리기</button>
-            )}
-          </div>
-        </div>
-
-        <div style={loginStyles.copyright}>
-          © 검단ABA 언어행동연구소 · 민다혜 (BCBA)
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ───────────────────────────────────────
-// 관리자 페이지
-// ───────────────────────────────────────
-function AdminView({ currentUser, onClose, onLogout, onViewTeacherHistory }) {
-  const [users, setUsers] = useState([]);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newId, setNewId] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newPw, setNewPw] = useState('');
-  const [addErr, setAddErr] = useState('');
-  const [confirmAction, setConfirmAction] = useState(null); // { message, onConfirm }
-  const [pwChangeFor, setPwChangeFor] = useState(null); // userId
-  const [newPwForReset, setNewPwForReset] = useState('');
-  const [pwResetErr, setPwResetErr] = useState('');
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [historyCounts, setHistoryCounts] = useState({});
-
-  const refresh = async () => {
-    const list = await loadUsers();
-    setUsers(list);
-    const counts = {};
-    await Promise.all(list.map(async (u) => {
-      try { counts[u.id] = (await loadUserHistory(u.id)).length; }
-      catch (e) { counts[u.id] = 0; }
-    }));
-    setHistoryCounts(counts);
-  };
-  useEffect(() => { refresh(); }, []);
-
-  const handleAdd = async () => {
-    setAddErr('');
-    const result = await createTeacher(newId, newName, newPw);
-    if (!result.ok) { setAddErr(result.error); return; }
-    setNewId(''); setNewName(''); setNewPw('');
-    setShowAddForm(false);
-    await refresh();
-  };
-
-  const handleDelete = (user) => {
-    setConfirmAction({
-      message: `${user.name} (${user.email || user.id}) 선생님 계정과 보관함을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
-      onConfirm: async () => {
-        await deleteTeacher(user.id, user.role);
-        await refresh();
-        setConfirmAction(null);
-      },
-    });
-  };
-
-  const handlePwReset = async () => {
-    setPwResetErr('');
-    const result = await changePassword(pwChangeFor, newPwForReset);
-    if (!result.ok) { setPwResetErr(result.error); return; }
-    setPwChangeFor(null);
-    setNewPwForReset('');
-    await refresh();
-  };
-
-  const teachers = users.filter(u => u.role !== 'admin');
-  const admin = users.find(u => u.role === 'admin');
-
-  // 각 선생님의 보관함 개수 (미리 로드된 상태 사용)
-  const getHistoryCount = (userId) => historyCounts[userId] ?? 0;
-
-  if (showTemplates) {
-    return <TemplateAdminView onClose={() => setShowTemplates(false)} onLogout={onLogout} />;
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data.access_token) {
+      saveSession(data);
+      return data;
+    }
+    return null;
+  } catch (e) {
+    return null;
   }
-
-  return (
-    <div style={loginStyles.container}>
-      <div style={adminStyles.wrapper}>
-        <div style={adminStyles.header}>
-          <div>
-            <div style={adminStyles.title}>관리자 페이지</div>
-            <div style={adminStyles.subtitle}>선생님 계정 관리 · 보관함 조회</div>
-          </div>
-          <div style={adminStyles.headerActions}>
-            <button onClick={() => setShowTemplates(true)} style={adminStyles.templateBtn}>가이드 템플릿 관리</button>
-            <button onClick={onClose} style={adminStyles.backBtn}>← 가이드 작성으로</button>
-            <button onClick={onLogout} style={adminStyles.logoutBtn}>로그아웃</button>
-          </div>
-        </div>
-
-        {/* 관리자 본인 정보 */}
-        {admin && (
-          <div style={adminStyles.section}>
-            <div style={adminStyles.sectionTitle}>관리자 계정</div>
-            <div style={adminStyles.adminCard}>
-              <div>
-                <div style={adminStyles.userName}>{admin.name}</div>
-                <div style={adminStyles.userId}>{admin.id}</div>
-              </div>
-              <button onClick={() => { setPwChangeFor(admin.id); setNewPwForReset(''); setPwResetErr(''); }} style={adminStyles.smallBtn}>
-                비밀번호 변경
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 선생님 목록 */}
-        <div style={adminStyles.section}>
-          <div style={adminStyles.sectionHeader}>
-            <div style={adminStyles.sectionTitle}>선생님 계정 ({teachers.length}명)</div>
-            <button onClick={() => setShowAddForm(!showAddForm)} style={adminStyles.addBtn}>
-              {showAddForm ? '취소' : '+ 선생님 추가'}
-            </button>
-          </div>
-
-          {showAddForm && (
-            <div style={adminStyles.addForm}>
-              <div style={adminStyles.formRow}>
-                <input
-                  type="email"
-                  placeholder="이메일 (예: kim@geomdan.com)"
-                  value={newId}
-                  onChange={(e) => setNewId(e.target.value)}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck="false"
-                  autoComplete="off"
-                  name="gd-new-id"
-                  style={adminStyles.formInput}
-                />
-                <input
-                  type="text"
-                  placeholder="이름 (선택, 비우면 이메일 사용)"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  autoComplete="off"
-                  name="gd-new-name"
-                  style={adminStyles.formInput}
-                />
-                <input
-                  type="text"
-                  placeholder="비밀번호 (6자 이상)"
-                  value={newPw}
-                  onChange={(e) => setNewPw(e.target.value)}
-                  autoComplete="off"
-                  name="gd-new-pw"
-                  style={adminStyles.formInput}
-                />
-              </div>
-              {addErr && <div style={adminStyles.errorMsg}>{addErr}</div>}
-              <button onClick={handleAdd} style={adminStyles.submitBtn}>계정 만들기</button>
-            </div>
-          )}
-
-          {teachers.length === 0 ? (
-            <div style={adminStyles.emptyMsg}>등록된 선생님이 없습니다. 위 버튼으로 추가해주세요.</div>
-          ) : (
-            <>
-              <button
-                onClick={() => onViewTeacherHistory('__ALL__')}
-                style={adminStyles.unifiedBtn}
-              >
-                📂 전체 통합 보기 — 모든 선생님 가이드 한눈에
-              </button>
-              <div style={adminStyles.teacherList}>
-              {teachers.map((t) => (
-                <div key={t.id} style={adminStyles.teacherCard}>
-                  <div style={adminStyles.teacherInfo}>
-                    <div style={adminStyles.userName}>{t.name}</div>
-                    <div style={adminStyles.userId}>{t.email || t.id} · 보관함 {getHistoryCount(t.id)}개</div>
-                  </div>
-                  <div style={adminStyles.teacherActions}>
-                    <button onClick={() => onViewTeacherHistory(t.id)} style={adminStyles.smallBtn}>
-                      보관함 보기
-                    </button>
-                    <button onClick={() => { setPwChangeFor(t.id); setNewPwForReset(''); setPwResetErr(''); }} style={adminStyles.smallBtn}>
-                      비번 변경
-                    </button>
-                    <button onClick={() => handleDelete(t)} style={adminStyles.dangerBtn}>
-                      삭제
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            </>
-          )}
-        </div>
-
-        {/* 비밀번호 변경 모달 */}
-        {pwChangeFor && (
-          <>
-            <div onClick={() => setPwChangeFor(null)} style={adminStyles.modalOverlay} />
-            <div style={adminStyles.modal}>
-              <div style={adminStyles.modalTitle}>비밀번호 변경 ({pwChangeFor})</div>
-              <input
-                type="text"
-                placeholder="새 비밀번호 (6자 이상)"
-                value={newPwForReset}
-                onChange={(e) => setNewPwForReset(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handlePwReset(); }}
-                autoComplete="off"
-                name="gd-reset-pw"
-                style={adminStyles.modalInput}
-                autoFocus
-              />
-              {pwResetErr && <div style={adminStyles.errorMsg}>{pwResetErr}</div>}
-              <div style={adminStyles.modalActions}>
-                <button onClick={() => setPwChangeFor(null)} style={adminStyles.cancelModalBtn}>취소</button>
-                <button onClick={handlePwReset} style={adminStyles.submitBtn}>변경</button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* 삭제 확인 모달 */}
-        {confirmAction && (
-          <>
-            <div onClick={() => setConfirmAction(null)} style={adminStyles.modalOverlay} />
-            <div style={adminStyles.modal}>
-              <div style={adminStyles.modalTitle}>확인</div>
-              <div style={adminStyles.modalMessage}>{confirmAction.message}</div>
-              <div style={adminStyles.modalActions}>
-                <button onClick={() => setConfirmAction(null)} style={adminStyles.cancelModalBtn}>취소</button>
-                <button onClick={confirmAction.onConfirm} style={adminStyles.deleteModalBtn}>삭제</button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
 }
 
-const loginStyles = {
-  container: {
-    minHeight: '100vh',
-    background: '#fdf5f5',
-    fontFamily: '"Noto Sans KR", "Apple SD Gothic Neo", -apple-system, sans-serif',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '20px',
-    color: '#3d2530',
-  },
-  card: {
-    width: '100%',
-    maxWidth: '380px',
-    background: '#fff',
-    borderRadius: '14px',
-    padding: '32px 26px',
-    border: '1px solid #f4d4dc',
-    boxShadow: '0 8px 30px rgba(168, 73, 96, 0.08)',
-  },
-  brand: {
-    textAlign: 'center',
-    marginBottom: '24px',
-    paddingBottom: '20px',
-    borderBottom: '1px solid #fae8ee',
-  },
-  brandName: {
-    fontSize: '17px',
-    fontWeight: 700,
-    color: '#3d2530',
-    marginBottom: '4px',
-  },
-  brandSub: {
-    fontSize: '12px',
-    color: '#8a6571',
-  },
-  field: {
-    marginBottom: '14px',
-  },
-  label: {
-    display: 'block',
-    fontSize: '12px',
-    fontWeight: 700,
-    color: '#a84960',
-    marginBottom: '6px',
-  },
-  input: {
-    width: '100%',
-    padding: '12px 14px',
-    border: '1px solid #f4d4dc',
-    borderRadius: '8px',
-    fontSize: '14px',
-    color: '#3d2530',
-    background: '#fff',
-    fontFamily: 'inherit',
-    boxSizing: 'border-box',
-    outline: 'none',
-  },
-  error: {
-    padding: '10px 12px',
-    background: '#fbe8ec',
-    color: '#a85a3e',
-    borderRadius: '6px',
-    fontSize: '13px',
-    marginBottom: '12px',
-  },
-  submitBtn: {
-    width: '100%',
-    padding: '14px',
-    background: '#e07187',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '10px',
-    fontSize: '15px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    marginTop: '6px',
-  },
-  hint: {
-    marginTop: '18px',
-    padding: '12px',
-    background: '#fef7f9',
-    borderRadius: '6px',
-    fontSize: '11.5px',
-    color: '#8a6571',
-    lineHeight: 1.65,
-    textAlign: 'center',
-  },
-  copyright: {
-    marginTop: '14px',
-    paddingTop: '14px',
-    borderTop: '1px solid #fae8ee',
-    fontSize: '10.5px',
-    color: '#a89098',
-    lineHeight: 1.7,
-    textAlign: 'center',
-  },
-};
-
-const adminStyles = {
-  wrapper: {
-    width: '100%',
-    maxWidth: '880px',
-    padding: '20px 16px',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '24px',
-    padding: '20px 22px',
-    background: '#fff',
-    borderRadius: '12px',
-    border: '1px solid #f4d4dc',
-    flexWrap: 'wrap',
-    gap: '12px',
-  },
-  title: {
-    fontSize: '20px',
-    fontWeight: 700,
-    color: '#a84960',
-    marginBottom: '4px',
-  },
-  subtitle: {
-    fontSize: '12px',
-    color: '#8a6571',
-  },
-  headerActions: {
-    display: 'flex',
-    gap: '8px',
-    flexWrap: 'wrap',
-  },
-  backBtn: {
-    padding: '8px 14px',
-    background: '#fce4ea',
-    color: '#a84960',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  templateBtn: {
-    padding: '8px 14px',
-    background: '#a84960',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  logoutBtn: {
-    padding: '8px 14px',
-    background: '#fff',
-    color: '#a85a3e',
-    border: '1px solid #f4d4dc',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  section: {
-    marginBottom: '20px',
-    padding: '20px 22px',
-    background: '#fff',
-    borderRadius: '12px',
-    border: '1px solid #f4d4dc',
-  },
-  sectionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '14px',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  sectionTitle: {
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#a84960',
-  },
-  addBtn: {
-    padding: '8px 14px',
-    background: '#e07187',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  addForm: {
-    padding: '16px',
-    background: '#fef7f9',
-    borderRadius: '8px',
-    marginBottom: '14px',
-    border: '1px solid #fae8ee',
-  },
-  formRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr',
-    gap: '8px',
-    marginBottom: '10px',
-  },
-  formInput: {
-    padding: '10px 12px',
-    border: '1px solid #f4d4dc',
-    borderRadius: '6px',
-    fontSize: '13px',
-    fontFamily: 'inherit',
-    boxSizing: 'border-box',
-    outline: 'none',
-  },
-  submitBtn: {
-    padding: '10px 18px',
-    background: '#e07187',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '13px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  errorMsg: {
-    padding: '8px 12px',
-    background: '#fbe8ec',
-    color: '#a85a3e',
-    borderRadius: '6px',
-    fontSize: '12px',
-    marginBottom: '10px',
-  },
-  emptyMsg: {
-    padding: '24px',
-    textAlign: 'center',
-    color: '#8a6571',
-    fontSize: '13px',
-    background: '#fef7f9',
-    borderRadius: '8px',
-  },
-  adminCard: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '14px 16px',
-    background: '#fce4ea',
-    borderRadius: '8px',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  teacherList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  teacherCard: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '14px 16px',
-    background: '#fef7f9',
-    borderRadius: '8px',
-    border: '1px solid #fae8ee',
-    flexWrap: 'wrap',
-    gap: '10px',
-  },
-  teacherInfo: { flex: 1, minWidth: 0 },
-  teacherActions: {
-    display: 'flex',
-    gap: '6px',
-    flexWrap: 'wrap',
-  },
-  userName: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: '#3d2530',
-    marginBottom: '3px',
-  },
-  userId: {
-    fontSize: '12px',
-    color: '#8a6571',
-  },
-  smallBtn: {
-    padding: '7px 12px',
-    background: '#fff',
-    color: '#a84960',
-    border: '1px solid #f4d4dc',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  unifiedBtn: {
-    width: '100%',
-    padding: '14px',
-    marginBottom: '12px',
-    background: 'linear-gradient(135deg, #a84960, #d4728a)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '10px',
-    fontSize: '14px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  dangerBtn: {
-    padding: '7px 12px',
-    background: '#fff',
-    color: '#a85a3e',
-    border: '1px solid #f0c8c0',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'rgba(0,0,0,0.4)',
-    zIndex: 200,
-  },
-  modal: {
-    position: 'fixed',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: 'calc(100vw - 32px)',
-    maxWidth: '360px',
-    background: '#fff',
-    borderRadius: '12px',
-    padding: '22px',
-    zIndex: 201,
-    boxShadow: '0 8px 30px rgba(0,0,0,0.2)',
-  },
-  modalTitle: {
-    fontSize: '15px',
-    fontWeight: 700,
-    color: '#a84960',
-    marginBottom: '12px',
-  },
-  modalMessage: {
-    fontSize: '13px',
-    color: '#3d2530',
-    lineHeight: 1.7,
-    marginBottom: '16px',
-    whiteSpace: 'pre-line',
-  },
-  modalInput: {
-    width: '100%',
-    padding: '11px 13px',
-    border: '1px solid #f4d4dc',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontFamily: 'inherit',
-    boxSizing: 'border-box',
-    outline: 'none',
-    marginBottom: '12px',
-  },
-  modalActions: {
-    display: 'flex',
-    gap: '8px',
-    justifyContent: 'flex-end',
-  },
-  cancelModalBtn: {
-    padding: '10px 16px',
-    background: '#fff',
-    color: '#3d2530',
-    border: '1px solid #f4d4dc',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  deleteModalBtn: {
-    padding: '10px 16px',
-    background: '#a85a3e',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-};
-
-const tplStyles = {
-  note: {
-    fontSize: '12.5px',
-    color: '#7a5560',
-    lineHeight: 1.7,
-    marginBottom: '16px',
-    padding: '12px 14px',
-    background: '#fdf3f6',
-    borderRadius: '8px',
-  },
-  code: {
-    background: '#fce4ea',
-    color: '#a84960',
-    padding: '1px 5px',
-    borderRadius: '4px',
-    fontSize: '11.5px',
-    fontFamily: 'monospace',
-  },
-  selectRow: {
-    display: 'flex',
-    gap: '12px',
-    flexWrap: 'wrap',
-    marginBottom: '14px',
-  },
-  selectGroup: {
-    flex: '1 1 160px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  selectLabel: {
-    fontSize: '12px',
-    fontWeight: 600,
-    color: '#a84960',
-  },
-  statusRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    marginBottom: '18px',
-  },
-  comboTag: {
-    fontSize: '13px',
-    fontWeight: 700,
-    color: '#3a2e32',
-  },
-  customBadge: {
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#fff',
-    background: '#a84960',
-    padding: '2px 8px',
-    borderRadius: '10px',
-  },
-  builtinBadge: {
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#8a8a8a',
-    background: '#eee',
-    padding: '2px 8px',
-    borderRadius: '10px',
-  },
-  fieldBlock: {
-    marginBottom: '14px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  fieldLabel: {
-    fontSize: '12.5px',
-    fontWeight: 600,
-    color: '#a84960',
-  },
-  fieldTextarea: {
-    width: '100%',
-    padding: '10px 12px',
-    fontSize: '13.5px',
-    border: '1px solid #f4d4dc',
-    borderRadius: '8px',
-    background: '#fff',
-    color: '#3a2e32',
-    fontFamily: 'inherit',
-    lineHeight: 1.65,
-    boxSizing: 'border-box',
-  },
-  actionRow: {
-    display: 'flex',
-    gap: '10px',
-    marginTop: '18px',
-    flexWrap: 'wrap',
-  },
-  saveBtn: {
-    padding: '11px 20px',
-    background: '#a84960',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  resetBtn: {
-    padding: '11px 18px',
-    background: '#fff',
-    color: '#a85a3e',
-    border: '1px solid #f4d4dc',
-    borderRadius: '8px',
-    fontSize: '13.5px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-};
-
-export default function App() {
-  // ── 인증 state ──
-  const [session, setSession] = useState(null); // { id, name, role }
-  const [booting, setBooting] = useState(true); // 세션 복원 완료 전까지 true
-  const [showAdminPage, setShowAdminPage] = useState(false);
-  const [viewingTeacherId, setViewingTeacherId] = useState(null); // 관리자가 특정 선생님 보관함 조회 중
-
-  const [topic, setTopic] = useState('');
-  const [childName, setChildName] = useState('');
-  const [selectedFunction, setSelectedFunction] = useState(null);
-  const [selectedDomain, setSelectedDomain] = useState('auto'); // 'auto' 또는 영역 id
-  const [selectedLevel, setSelectedLevel] = useState('mid'); // 'early' | 'mid' | 'high'
-  const [otherDetail, setOtherDetail] = useState('');
-  const [altBehavior, setAltBehavior] = useState(''); // ★ [대신할 행동] 선생님이 적는 칸
-  const [guide, setGuide] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [guideSeed, setGuideSeed] = useState(0);
-  const [favorites, setFavorites] = useState(DEFAULT_FAVORITES);
-  const [history, setHistory] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showManual, setShowManual] = useState(false);
-  const [copyStatus, setCopyStatus] = useState('');
-  const [elapsed, setElapsed] = useState(0);
-  const [confirmAction, setConfirmAction] = useState(null); // { message, onConfirm }
-  const [historyFilter, setHistoryFilter] = useState(''); // 아동 이름 필터
-  const [ownerNameMap, setOwnerNameMap] = useState({}); // 통합 조회 시 선생님 id→이름
-  const [collapsedOwners, setCollapsedOwners] = useState({}); // 통합 조회 시 접힌 선생님 폴더
-  const [isEditing, setIsEditing] = useState(false);
-  const [editDraft, setEditDraft] = useState(null);
-  const [abaLink, setAbaLink] = useState(() => readAbaLink()); // ★ [도구 연결]
-  const [abaLinkWarn, setAbaLinkWarn] = useState(false);
-  const abaNameFilledRef = useRef(false);
-  const [checkTable, setCheckTable] = useState(
-    Array(7).fill(null).map(() => ({ attempts: '', success: '' }))
-  );
-  const timerRef = useRef(null);
-  const inputRef = useRef(null);
-
-  // 첫 마운트: 커스텀 템플릿 캐시 로드 + 저장된 세션 복원 (로그인 상태 유지)
-  useEffect(() => {
-    (async () => {
-      await refreshCustomTemplates();
-      try {
-        const restored = await loadSession();
-        if (restored) setSession(restored);
-      } catch (e) {}
-      setBooting(false);
-    })();
-  }, []);
-
-  // ★ [도구 연결] 관리자일 때만, 통합본에서 넘어온 아이 이름(성 뺀 이름)을 한 번 채워 둔다
-  useEffect(() => {
-    if (!session || session.role !== 'admin' || !abaLink || abaNameFilledRef.current) return;
-    abaNameFilledRef.current = true;
-    if (!childName.trim()) setChildName(abaGivenName(abaLink.name));
-  }, [session, abaLink]);
-
-  // 세션이 바뀔 때마다 그 사용자의 favorites/history 로드
-  // (관리자가 특정 선생님 보관함 보는 중이면 그쪽 데이터 로드)
-  useEffect(() => {
-    if (!session) {
-      setFavorites(DEFAULT_FAVORITES);
-      setHistory([]);
-      return;
-    }
-    const dataUserId = viewingTeacherId || session.id;
-
-    if (supabaseConfigured()) {
-      let cancelled = false;
-      (async () => {
-        // 즐겨찾기는 항상 본인 것
-        try {
-          const favs = await dbGetFavorites(session.id);
-          if (!cancelled) setFavorites(Array.isArray(favs) && favs.length ? favs : DEFAULT_FAVORITES);
-        } catch (e) { if (!cancelled) setFavorites(DEFAULT_FAVORITES); }
-        // 보관함: 통합('__ALL__')이면 전체, 아니면 해당 사용자
-        try {
-          const ownerArg = dataUserId === '__ALL__' ? null : dataUserId;
-          const rows = await dbListGuides(ownerArg);
-          const guides = rows.map(r => ({
-            ...r.payload,
-            guide_id: r.guide_id,
-            owner_id: r.owner_id,
-            createdAt: r.payload?.createdAt || r.created_at,
-          }));
-          if (!cancelled) setHistory(guides);
-          // 통합 조회일 때는 선생님 이름(id→name) 맵도 준비
-          if (dataUserId === '__ALL__') {
-            try {
-              const users = await dbListUsers();
-              const map = {};
-              (users || []).forEach(u => { map[u.id] = u.name || u.id; });
-              if (!cancelled) setOwnerNameMap(map);
-            } catch (e) { /* 이름 못 불러와도 id로 표시 */ }
-          }
-        } catch (e) { if (!cancelled) setHistory([]); }
-      })();
-      return () => { cancelled = true; };
-    }
-
-    // ── localStorage 폴백 ──
+async function getValidAccessToken() {
+  let session = getStoredSession();
+  if (session?.access_token) return session.access_token;
+  const raw = sessionStorage.getItem(AUTH_SESSION_KEY);
+  if (raw) {
     try {
-      const favRaw = safeGetLS(favoritesKey(session.id));
-      if (favRaw) {
-        try { setFavorites(JSON.parse(favRaw)); } catch (e) { setFavorites(DEFAULT_FAVORITES); }
-      } else {
-        const v2 = safeGetLS(STORAGE_KEY_FAVORITES_V2);
-        if (v2 && session.id === DEFAULT_ADMIN.id) {
-          safeSetLS(favoritesKey(session.id), v2);
-          try { setFavorites(JSON.parse(v2)); } catch (e) { setFavorites(DEFAULT_FAVORITES); }
-        } else {
-          setFavorites(DEFAULT_FAVORITES);
-        }
-      }
-      const histRaw = safeGetLS(historyKey(dataUserId));
-      if (histRaw) {
-        try { setHistory(JSON.parse(histRaw)); } catch (e) { setHistory([]); }
-      } else {
-        const v2 = safeGetLS(STORAGE_KEY_HISTORY_V2);
-        if (v2 && dataUserId === DEFAULT_ADMIN.id) {
-          safeSetLS(historyKey(dataUserId), v2);
-          try { setHistory(JSON.parse(v2)); } catch (e) { setHistory([]); }
-        } else {
-          setHistory([]);
-        }
-      }
-    } catch (e) {
-      console.error('Storage load error:', e);
-    }
-  }, [session, viewingTeacherId]);
-
-  useEffect(() => {
-    if (loading) {
-      setElapsed(0);
-      const start = Date.now();
-      timerRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - start) / 1000));
-      }, 200);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [loading]);
-
-  const saveFavorites = (next) => {
-    setFavorites(next);
-    if (!session) return;
-    if (supabaseConfigured()) {
-      dbSetFavorites(session.id, next).catch(() => {});
-      return;
-    }
-    safeSetLS(favoritesKey(session.id), JSON.stringify(next));
-  };
-
-  const saveHistory = (next) => {
-    setHistory(next);
-    if (!session) return;
-    if (supabaseConfigured()) return; // Supabase 모드: 개별 DB 함수로 처리(아래 호출부)
-    const dataUserId = viewingTeacherId || session.id;
-    safeSetLS(historyKey(dataUserId), JSON.stringify(next));
-  };
-
-  const addToFavorites = () => {
-    const t = topic.trim();
-    if (!t || favorites.includes(t)) return;
-    saveFavorites([t, ...favorites].slice(0, 20));
-  };
-
-  const selectFavorite = (f) => {
-    setTopic(f);
-    setError('');
-    try {
-      if (inputRef.current && typeof inputRef.current.focus === 'function') {
-        inputRef.current.focus();
+      const old = JSON.parse(raw);
+      if (old.refresh_token) {
+        const refreshed = await refreshSession(old.refresh_token);
+        if (refreshed?.access_token) return refreshed.access_token;
       }
     } catch (e) {}
+  }
+  return null;
+}
+
+async function authHeaders() {
+  const token = await getValidAccessToken();
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: token ? `Bearer ${token}` : `Bearer ${SUPABASE_ANON_KEY}`,
+    "Content-Type": "application/json",
   };
+}
 
-  const removeFavorite = (item) => {
-    saveFavorites(favorites.filter(f => f !== item));
-  };
+// =====================================================================
+// Auth API 함수들
+// =====================================================================
+async function signInWithPassword(email, password) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      return { error: data.error_description || data.msg || data.error || "로그인 실패" };
+    }
+    saveSession(data);
+    return { session: data, user: data.user };
+  } catch (e) {
+    return { error: "네트워크 오류: " + e.message };
+  }
+}
 
-  const generateGuide = async (overrideTopic, overrideFunction, seedOverride) => {
-    const t = (overrideTopic ?? topic).trim();
-    const fn = overrideFunction ?? selectedFunction;
-    if (!t) { setError('주제를 입력해주세요.'); return; }
-    if (!fn) { setError('예상 행동 기능을 선택해주세요.'); return; }
-    // seed 결정: 다시 생성이면 이전 +1, 새 생성이면 0
-    const seed = Number.isFinite(seedOverride) ? seedOverride : 0;
-    setGuideSeed(seed);
-    setTopic(t);
-    setSelectedFunction(fn);
-    setLoading(true);
-    setError('');
-    setGuide(null);
-    setIsEditing(false);
-    setEditDraft(null);
+async function signOut() {
+  try {
+    const token = await getValidAccessToken();
+    if (token) {
+      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+      });
+    }
+  } catch (e) {}
+  saveSession(null);
+}
 
-    try {
-      const domId = (selectedDomain && selectedDomain !== 'auto') ? selectedDomain : detectDomain(t);
-      const required = ['intro','goal','function_analysis','materials','practice','waiting','reinforcement','weekly_focus','next_priority'];
+async function getCurrentUser() {
+  try {
+    const token = await getValidAccessToken();
+    if (!token) return null;
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) {
+    return null;
+  }
+}
 
-      // 항상 템플릿 결과를 먼저 준비 (AI 실패 시 폴백 + AI 누락 필드 보강)
-      const fallback = buildLocalGuide(t, fn, childName.trim(), otherDetail.trim(), domId, seed, selectedLevel, altBehavior.trim());
+// 관리자용: 새 유저 만들기 (공유 admin-users Edge Function)
+async function adminCreateUser(email, password, displayName) {
+  try {
+    const headers = await authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        action: "create",
+        email,
+        password,
+        display_name: displayName || email.split("@")[0],
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error || "계정 생성 실패" };
+    return { user: data.user };
+  } catch (e) {
+    return { error: "네트워크 오류: " + e.message };
+  }
+}
 
-      let parsed = fallback;
-      let usedAI = false;
+async function adminDeleteUser(userId) {
+  try {
+    const headers = await authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "delete", user_id: userId }),
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      return { error: data.error || "삭제 실패" };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { error: "네트워크 오류: " + e.message };
+  }
+}
 
-      // ★ [AI 끄기] 2026-10: 원장님이 검토한 문구만 나가도록 AI 생성을 꺼 둠. 다시 켜려면 USE_GUIDE_AI를 true로.
-      const endpoint = USE_GUIDE_AI ? "https://vdubgrxwijydwfabwpnk.supabase.co/functions/v1/guide-ai" : "";
-      if (endpoint) {
-        // AI 먼저 시도. 실패하면 조용히 템플릿으로 넘어간다.
-        try {
-          // [3단계] 프롬프트 조립은 서버(guide-ai)가 한다. 앱은 재료만 보낸다.
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 55000);
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${AI_RELAY_KEY}`,
-            },
-            body: JSON.stringify({
-              topic: t,
-              fn,
-              childName: childName.trim(),
-              otherDetail: otherDetail.trim(),
-              domainId: domId,
-              level: selectedLevel,
-              max_tokens: 2200,
-              stream: false,
-            }),
-            signal: controller.signal,
+async function adminUpdateUserPassword(userId, newPassword) {
+  try {
+    const headers = await authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "update_password", user_id: userId, password: newPassword }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error || "비번 변경 실패" };
+    return { ok: true };
+  } catch (e) {
+    return { error: "네트워크 오류: " + e.message };
+  }
+}
+
+// 관리자용: 전체 유저 목록 (공유 admin_list_users RPC)
+async function adminListUsers() {
+  try {
+    const headers = await authHeaders();
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/admin_list_users`, {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    if (!r.ok) return [];
+    return await r.json();
+  } catch (e) {
+    return [];
+  }
+}
+
+// =====================================================================
+// JAR 저장/조회 (esdm_plans 테이블 — RLS로 본인 데이터만 접근)
+// =====================================================================
+async function plansList() {
+  try {
+    const headers = await authHeaders();
+    const user = await getCurrentUser();
+    if (!user?.id) return [];
+    const url = `${SUPABASE_URL}/rest/v1/esdm_plans?user_id=eq.${user.id}&select=id,title,levels,toys,domains,plan,created_at&order=created_at.desc`;
+    const r = await fetch(url, { headers });
+    if (!r.ok) return [];
+    return await r.json();
+  } catch (e) {
+    return [];
+  }
+}
+
+async function plansInsert({ title, levels, toys, domains, plan }) {
+  try {
+    const headers = await authHeaders();
+    const user = await getCurrentUser();
+    if (!user?.id) return { error: "로그인이 필요합니다." };
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/esdm_plans`, {
+      method: "POST",
+      headers: { ...headers, Prefer: "return=representation" },
+      body: JSON.stringify({ user_id: user.id, title, levels, toys, domains, plan }),
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      return { error: data.message || "저장 실패" };
+    }
+    const rows = await r.json();
+    return { plan: rows && rows[0] };
+  } catch (e) {
+    return { error: "네트워크 오류: " + e.message };
+  }
+}
+
+async function plansDelete(planId) {
+  try {
+    const headers = await authHeaders();
+    const user = await getCurrentUser();
+    if (!user?.id) return { error: "로그인이 필요합니다." };
+    const url = `${SUPABASE_URL}/rest/v1/esdm_plans?id=eq.${planId}&user_id=eq.${user.id}`;
+    const r = await fetch(url, { method: "DELETE", headers });
+    if (!r.ok) return { error: "삭제 실패" };
+    return { ok: true };
+  } catch (e) {
+    return { error: "네트워크 오류: " + e.message };
+  }
+}
+
+const LEVELS = [
+  { id: 1, name: "레벨 1", age: "12–18개월" },
+  { id: 2, name: "레벨 2", age: "19–24개월" },
+  { id: 3, name: "레벨 3", age: "25–36개월" },
+  { id: 4, name: "레벨 4", age: "37–48개월" },
+];
+
+const LEVEL_FOCUS = {
+  1: "수용·표현언어, 사회기술, 모방, 인지, 놀이, 대근육, 자조기술",
+  2: "어휘 확장, 2어절 조합, 공동주의, 상징놀이 시작, 차례 주고받기",
+  3: "구문 확장, 가장놀이, 또래 관심, 규칙 있는 놀이, 자기조절",
+  4: "대화 주고받기, 이야기 구성, 협동놀이, 감정 표현, 문제해결",
+};
+
+// 통합 시스템(aba-system)의 ESDM 매핑을 레벨×영역으로 정제.
+// 레벨4는 레벨3 항목을 이어받고 인지(수학·읽기)를 추가.
+// ESDM 덴버모델 발달 체크리스트(레벨1~4)를 참고해 영역별 대표 발달 키워드로 재구성.
+// 원문 항목을 그대로 옮기지 않고, 회기 목표 표시에 맞게 짧은 키워드로 정리함.
+const ESDM_CURRICULUM = {
+  1: {
+    // 12~18개월
+    수용언어: ["소리 쪽 쳐다보기", "호명 반응", "간단한 지시 따르기"],
+    표현언어: ["요청 몸짓", "의도적 발성", "다양한 옹알이"],
+    공동주의: ["가리키면 쳐다보기", "눈 맞춤 시작"],
+    모방: ["사물 동작 모방", "몸짓 모방", "소리 모방"],
+    사회기술: ["짧은 사회적 놀이", "눈 맞춤", "인사 반응"],
+    놀이: ["기능적 사물 놀이", "간단한 장난감 조작", "정리하기"],
+    인지: ["같은 사물 짝짓기", "같은 그림 짝짓기"],
+    소근육: ["끼우기·꽂기", "블록 쌓기", "끼적이기"],
+    대근육: ["공 차기", "계단 오르내리기", "공 주고받기"],
+    자조: ["컵·숟가락 쓰기", "손에 물 대기", "휴지 버리기"],
+  },
+  2: {
+    // 19~24개월
+    수용언어: ["멈춰·기다려 따르기", "여러 지시 따르기", "신체 부위 가리키기"],
+    표현언어: ["몸짓+소리 표현", "단어로 요청·거절", "사물 이름 대기"],
+    공동주의: ["보여주면 반응", "함께 주고받기", "자발적 가리키기"],
+    모방: ["소리·단어 모방", "동작 모방", "두 동작 모방"],
+    사회기술: ["눈맞춤 유지", "도움 요청", "또래와 주고받기"],
+    놀이: ["연관 사물 놀이", "소리 흉내 놀이", "혼자 놀이 유지"],
+    인지: ["모양·크기 분류", "기능별 분류", "1~3개 짝짓기"],
+    소근육: ["모양 끼우기", "블록 쌓기·따라 만들기", "통 열고 닫기"],
+    대근육: ["자세 바꿔 활동", "놀이터 기구 사용", "목표로 공 던지기"],
+    자조: ["혼자 먹기", "옷 벗어 정리", "이 닦기·정리"],
+  },
+  3: {
+    // 25~36개월
+    수용언어: ["예·아니오 대답", "2개 지시 따르기", "크기·색 구분"],
+    표현언어: ["2~3단어 조합", "위치어 사용", "무엇·어디 질문 답"],
+    공동주의: ["관심 함께 나누기", "정서 알아차리기"],
+    모방: ["새 노래·손동작 모방", "또래 동작 모방"],
+    사회기술: ["물건 공유", "차례 지키기", "정중한 표현"],
+    놀이: ["연관 행동 잇기", "인형·동물 놀이", "소품 배치"],
+    인지: ["철자·숫자 짝짓기", "5까지 세기", "순서대로 이야기"],
+    소근육: ["조각 퍼즐", "선·모양 따라 그리기", "가위질"],
+    대근육: ["세발자전거", "공 던지고 차기", "점프"],
+    자조: ["화장실 단계", "혼자 손 씻기", "옷 입고 벗기"],
+  },
+  4: {
+    // 37~48개월
+    수용언어: ["비교·부정 이해", "위치·시간 관계", "여러 지시 따르기"],
+    표현언어: ["3~4단어 문장", "왜·어떻게 답", "경험 이야기하기"],
+    공동주의: ["대화 주고받기", "관심 끌어 공유하기"],
+    모방: ["복잡한 동작 모방", "그림·글자 모방"],
+    사회기술: ["또래 초대", "감정 표현", "순서 지키기"],
+    놀이: ["역할 놀이", "상징 놀이", "이야기 놀이"],
+    인지: ["20까지 세기", "수 개념", "글자·숫자 알기"],
+    소근육: ["그림·글자 그리기", "미술 3단계 활동", "정교한 가위질"],
+    대근육: ["공 던지고 받기", "자전거 타기", "한 발 점프"],
+    자조: ["화장실 독립", "식사 준비 돕기", "간단한 요리 돕기"],
+  },
+};
+
+// 선택한 레벨들의 ESDM 영역·항목을 병합해 반환
+// ---- 한글 조사 자동 처리 (통합본 방식) ----
+function hasFinalConsonant(word) {
+  if (!word) return false;
+  const last = word.charAt(word.length - 1);
+  const code = last.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return false;
+  return (code - 0xac00) % 28 !== 0;
+}
+// 단어 뒤에 알맞은 조사를 붙여 반환 (예: J("케이크","을","를") → "케이크를")
+function J(word, withFinal, withoutFinal) {
+  return (word || "") + (hasFinalConsonant(word) ? withFinal : withoutFinal);
+}
+function Jro(word) {
+  // 으로/로: 받침 없거나 'ㄹ'이면 "로"
+  if (!word) return word + "로";
+  const last = word.charAt(word.length - 1);
+  const code = last.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return word + "로";
+  const jong = (code - 0xac00) % 28;
+  return word + (jong === 0 || jong === 8 ? "로" : "으로");
+}
+// 텍스트 안의 "단어을(를)" 같은 패턴을 받침에 맞게 정리
+function fixJosa(text) {
+  if (typeof text !== "string") return text;
+  return text
+    .replace(/([가-힣A-Za-z0-9]+)을\(를\)/g, (_, w) => J(w, "을", "를"))
+    .replace(/([가-힣A-Za-z0-9]+)를\(을\)/g, (_, w) => J(w, "을", "를"))
+    .replace(/([가-힣A-Za-z0-9]+)은\(는\)/g, (_, w) => J(w, "은", "는"))
+    .replace(/([가-힣A-Za-z0-9]+)는\(은\)/g, (_, w) => J(w, "은", "는"))
+    .replace(/([가-힣A-Za-z0-9]+)이\(가\)/g, (_, w) => J(w, "이", "가"))
+    .replace(/([가-힣A-Za-z0-9]+)가\(이\)/g, (_, w) => J(w, "이", "가"))
+    .replace(/([가-힣A-Za-z0-9]+)와\(과\)/g, (_, w) => J(w, "과", "와"))
+    .replace(/([가-힣A-Za-z0-9]+)과\(와\)/g, (_, w) => J(w, "과", "와"))
+    .replace(/([가-힣A-Za-z0-9]+)으로\(로\)/g, (_, w) => Jro(w))
+    .replace(/([가-힣A-Za-z0-9]+)로\(으로\)/g, (_, w) => Jro(w))
+    // 잘못된 "이이다" 같은 중복도 정리
+    .replace(/이이다/g, "이다");
+}
+// 객체 전체(문자열)에 조사 정리 적용
+function deepFixJosa(obj) {
+  if (typeof obj === "string") return fixJosa(obj);
+  if (Array.isArray(obj)) return obj.map(deepFixJosa);
+  if (obj && typeof obj === "object") {
+    const out = {};
+    for (const k in obj) out[k] = deepFixJosa(obj[k]);
+    return out;
+  }
+  return obj;
+}
+
+// 한국 이름에서 성을 떼어 부르는 이름만 반환 (3글자면 성 1자 제거)
+// 예: "민다솔"→"다솔", "김서연"→"서연", "이안"→"안"(2자는 그대로), "다솔"→"다솔"
+function givenName(full) {
+  const n = (full || "").trim();
+  if (!n) return "";
+  // 한글 이름이고 3글자 이상이면 첫 글자(성)를 뗌
+  const isHangul = /^[가-힣]+$/.test(n);
+  if (isHangul && n.length >= 3) return n.slice(1);
+  return n;
+}
+// 받침에 따라 "다솔이 / 서연이" 식 호칭 (받침 있으면 "이" 붙임)
+function childCall(full) {
+  const g = givenName(full);
+  if (!g) return "OO이";
+  return hasFinalConsonant(g) ? g + "이" : g;
+}
+
+function esdmForLevels(levelIds) {
+  const merged = {};
+  levelIds.forEach((id) => {
+    const lv = ESDM_CURRICULUM[id] || {};
+    Object.entries(lv).forEach(([domain, items]) => {
+      if (!merged[domain]) merged[domain] = [];
+      items.forEach((it) => {
+        if (!merged[domain].includes(it)) merged[domain].push(it);
+      });
+    });
+  });
+  return merged;
+}
+
+// 놀잇감별 전용 장면 (주요 6종). {main}=주 놀잇감, {sub}=보조, {child}=아이호칭
+// 놀잇감별 전용 스토리 (15종). {main}=주 놀잇감, {sub}=보조, {child}=아이호칭
+// 각 놀잇감: theme(주제), materials(맞춤 준비물), tip(막힐 때), songs(추천 노래), closing(마무리), scenes(7장면 스토리)
+const TOY_SCENES = {
+  기차: {
+    theme: "칙칙폭폭 기차여행",
+    materials: "기차·기찻길(블록으로 대체 가능) 여러 칸, 작은 인형이나 피규어 2~3개, 담을 상자",
+    tip: "기차에만 몰두하고 상호작용이 안 되면, 부모가 터널·역이 되어 기차가 부모를 꼭 거쳐 가도록 길을 막아 서로 마주 보게 만들어 주세요.",
+    songs: [
+      '"기차 노래" — "칙칙폭폭" 부분을 반복하며 손을 앞뒤로 흔들어 동작 모방 유도',
+      '"기차가 어디로 가나" — 역 이름 자리에 아이가 아는 장소를 넣어 부르며 어휘 확장',
+    ],
+    closing: [
+      '카운트다운: "역까지 세 번만 더 가고 도착~ 셋·둘·하나!" 하고 종료를 예고합니다.',
+      '정리 노래: "기차 차고로 들어가요~" 부르며 기차를 상자에 하나씩 넣습니다.',
+      '다음 활동 예고: "다음 역은 OO이에요" 하며 다음 활동을 알려 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["기차역 만들기", '블록이나 손으로 길을 만들며 "여기는 기차역~" 하고 {main}을(를) 길 위에 올립니다', '{child}에게 기차 한 칸을 건네며 "여기 놔" 하고 자리를 가리켜 지시 따르기를 유도'],
+      ["출발 신호", '"준비~ 출발!" 하며 {main}을(를) 천천히 밀어 굴립니다', '"출발?" 하고 3~5초 기다려 {child}이(가) 소리나 동작으로 신호를 주면 바로 밀어주기'],
+      ["칙칙폭폭 달리기", '"칙칙폭폭~ 칙칙폭폭~" 리듬을 타며 {main}을(를) 길게 굴립니다', '같은 의성어를 함께 내며 모방 유도. {child}이(가) 따라 하면 과장되게 "우와!" 반응'],
+      ["터널 통과", '두 손으로 터널을 만들어 "터널 속으로 슈웅~" 하고 {main}을(를) 통과시킵니다', '{child} 차례에 "슈웅?" 하고 기다리기. 통과하면 눈 맞추며 "여기!" 공동주의'],
+      ["승객 태우기", '{sub}을(를) 기차에 올리며 "친구 타세요~ 출발!" 합니다', '"태워", "내려" 짧은 지시 반복. {child}이(가) 올리면 즉시 "잘했어!" 강화'],
+      ["기차 차례", '"엄마 기차~" 한 번, "{child} 기차~" 한 번 번갈아 굴립니다', '차례 개념을 짧은 대사로. {child}이(가) 기다리면 "잘 기다렸어!" 사회기술 강화'],
+      ["기차 정리역", '"이제 차고로 쏙~ 들어간다!" 하며 {main}을(를) 통에 넣습니다', '통을 가리키며 "넣어" 지시. 넣으면 "다 했다!" 칭찬으로 마무리'],
+    ],
+  },
+  자동차: {
+    theme: "부릉부릉 자동차 놀이",
+    materials: "다양한 크기·색 자동차 3~4대, 주차장/도로 매트(종이로 대체 가능), 담을 바구니",
+    tip: "바퀴만 돌리며 혼자 놀면, 부모 손을 '주유소'나 '세차장'으로 만들어 자동차가 부모에게 오도록 유도해 상호작용을 늘려 주세요.",
+    songs: [
+      '"자동차 노래" — "빵빵" 경적 부분을 반복하며 아이의 발성·모방을 유도',
+      '"빙글빙글 바퀴 노래" — 손을 굴리는 동작과 함께 부르며 동작 모방 연결',
+    ],
+    closing: [
+      '카운트다운: "자동차 세 번만 더 부릉 하고 끝~ 셋·둘·하나!" 하고 예고합니다.',
+      '정리 노래: "자동차 주차장에 쏙~" 부르며 정해진 자리(상자)에 넣습니다.',
+      '다음 활동 예고: "다음엔 OO 하러 가요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["자동차 등장", '{main}을(를) "부릉부릉~" 소리 내며 {child} 앞으로 천천히 굴려 보냅니다', '쳐다보면 3~5초 기다린 뒤 건네며 교대의 첫 경험. 손을 뻗으면 "줘?" 요청 유도'],
+      ["부릉부릉 출발", '"출발! 빵빵!" 하며 {main}을(를) 밀고 {child}을(를) 쳐다보며 기다립니다', '"빵빵" 모방 유도 위해 과장된 입모양. 발성하면 즉시 자동차를 굴려 원인-결과 학습'],
+      ["주고받기 경주", '"엄마 먼저~ 이제 {child} 차례!" 하며 번갈아 자동차를 굴립니다', '"줘"·"여기" 지시 반복. 차례를 기다리면 "잘 기다렸어!" 사회기술 강화'],
+      ["어? 새 자동차", '{sub}을(를) 꺼내 "어? 이번엔 {sub}!" 하며 놀란 표정으로 관심을 모읍니다', '예측을 살짝 깨 주의 모으기. 가리키며 "여기 봐!" 공동주의 유도'],
+      ["언덕 오르내리기", '쿠션으로 언덕을 만들어 "영차~ 올라간다! 슈웅 내려간다!" 굴립니다', '대근육·공간 경험. "위", "아래" 언어와 동작을 함께 매칭'],
+      ["자동차 차례", '"엄마 차례~" "{child} 차례~" 번갈아 굴리거나 밀어줍니다', '차례 대사 반복. 기다리면 즉시 "최고야!" 강화'],
+      ["주차장에 쏙", '"이제 주차장으로 쏙~" 하며 {main}을(를) 상자에 넣습니다', '상자를 가리키며 "넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  블록: {
+    theme: "쌓고 무너뜨리는 블록놀이",
+    materials: "다양한 색·크기 블록 10개 이상, 담을 통, 넓은 바닥 공간",
+    tip: "블록을 줄 세우기만 반복하면, 부모가 한 개를 살짝 얹어 '탑'을 제안하고 무너뜨리는 재미를 보여줘 새로운 놀이로 이끌어 주세요.",
+    songs: [
+      '"블록 쌓기 노래" — "하나 둘 셋" 세는 부분을 반복하며 수 세기와 함께 쌓기',
+      '"와르르 노래" — 무너뜨리기 직전 "와르르!" 부분에서 함께 소리치며 기대감 형성',
+    ],
+    closing: [
+      '카운트다운: "블록 세 개만 더 쌓고 끝~ 셋·둘·하나!" 하고 예고합니다.',
+      '정리 노래: "블록 쏙쏙 통에 넣자~" 부르며 색깔별로 담습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 다음 활동을 보여줍니다.',
+    ],
+    scenes: [
+      ["블록 모으기", '{main}을(를) 가운데 모으며 "블록 모여라~" 하고 한 개를 {child}에게 건넵니다', '손을 뻗으면 "줘?" 하고 잠깐 기다려 요청을 유도한 뒤 건네기'],
+      ["하나씩 쌓기", '"하나~ 둘~ 쌓자!" 하며 블록을 하나씩 올립니다', '{child}이(가) 올릴 때마다 "또!" 하고 같은 동작 모방. 두 손 사용 유도'],
+      ["높이 더 높이", '"더 높이! 영차~" 하며 탑을 점점 높게 쌓습니다', '"더?" 하고 3초 기다려 {child}이(가) 블록을 집어 오면 자리를 가리켜 지시'],
+      ["와르르 무너뜨리기", '"준비~ 와르르!" 하며 탑을 과장되게 무너뜨립니다', '예측을 깨 주의를 모읍니다. {child}이(가) 웃으면 "또 할까?" 자발적 요청 기다리기'],
+      ["색깔 짝 맞추기", '같은 색 블록을 들어 "같은 거 어디?" 하고 {sub}와(과) 짝지어 봅니다', '같은 색을 가리키며 "여기!" 공동주의·매칭(인지) 유도'],
+      ["블록 차례", '"엄마 차례~" "{child} 차례~" 번갈아 한 개씩 올립니다', '차례를 짧은 대사로 반복. 기다리면 즉시 칭찬으로 강화'],
+      ["블록 정리", '"쏙쏙~ 통에 넣자!" 하며 블록을 통에 담습니다', '통을 가리키며 "넣어" 지시. 넣으면 "최고야!" 마무리 강화'],
+    ],
+  },
+  공: {
+    theme: "데굴데굴 공놀이",
+    materials: "잘 굴러가는 공 1~2개(말랑한 것), 골대나 바구니, 넓은 바닥 공간",
+    tip: "공을 던지기만 하면 다칠 수 있으니, 마주 앉아 '굴리기'부터 시작하고, 눈을 안 맞추면 공을 부모 얼굴 옆에 들어 시선을 모아 주세요.",
+    songs: [
+      '"데굴데굴 노래" — "데굴데굴" 부분을 반복하며 공 굴리는 동작과 연결',
+      '"통통 공 노래" — 공을 튕기며 "통통" 리듬에 맞춰 발성·모방 유도',
+    ],
+    closing: [
+      '카운트다운: "공 세 번만 더 굴리고 끝~ 셋·둘·하나!" 하고 예고합니다.',
+      '정리 노래: "공아 쉬자~ 쏙!" 부르며 통에 넣습니다.',
+      '다음 활동 예고: "다음엔 OO 해요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["공 보여주기", '{main}을(를) 들고 "짠~ 공이다!" 하며 {child} 눈높이에서 흔듭니다', '쳐다보면 3~5초 기다린 뒤 건네며 교대의 첫 경험 만들기'],
+      ["데굴데굴 굴리기", '마주 앉아 "데굴데굴~ 간다!" 하고 공을 {child}에게 굴립니다', '굴러오면 "줘~" 하고 손 내밀기. 다시 굴리면 과장되게 "우와!" 강화'],
+      ["통통 튀기기", '"통통통!" 하며 공을 바닥에 튕깁니다', '리듬을 함께 내며 모방 유도. {child}이(가) 따라 손뼉 치면 즉시 반응'],
+      ["굴러간다 잡기", '"잡아라~ 데굴!" 하며 공을 살짝 멀리 굴립니다', '{child}이(가) 따라가 잡으면 "잡았다!" 환호. 대근육·동작모방 유도'],
+      ["바구니에 넣기", '"여기 쏙~ 골인!" 하며 공을 바구니에 넣습니다', '바구니를 가리키며 "넣어" 지시. 넣으면 "골인!" 즉각 강화'],
+      ["공 차례", '"엄마 차례~" "{child} 차례~" 번갈아 굴리거나 던집니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 사회기술 강화'],
+      ["공 정리", '"공아 쉬자~ 쏙!" 하며 공을 통에 넣습니다', '통 가리키며 "넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  비눗방울: {
+    theme: "뽀글뽀글 비눗방울놀이",
+    materials: "비눗방울 용액과 막대, 바람막이 되는 조용한 공간, 닦을 수건",
+    tip: "비눗방울을 못 잡아 답답해하면, 큰 방울을 천천히 만들어 아이 손 가까이 띄워 성공 경험을 먼저 주세요.",
+    songs: [
+      '"비눗방울 노래" — "뽀글뽀글" 부분을 반복하며 부는 동작과 발성 연결',
+      '"팡팡 노래" — 방울 터뜨릴 때 "팡!" 부분에서 함께 소리치며 모방 유도',
+    ],
+    closing: [
+      '카운트다운: "세 번만 더 불고 끝~ 셋·둘·하나!" 하고 예고합니다.',
+      '정리 노래: "비눗방울 안녕~ 뚜껑 쏙!" 부르며 통을 닫습니다.',
+      '다음 활동 예고: "이제 손 씻고 OO 해요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["방울 등장", '{main}을(를) 후~ 불어 "뽀글뽀글~ 방울이다!" 하고 띄웁니다', '{child}이(가) 쳐다보면 "또?" 하고 기다려 소리나 손짓 요청을 유도'],
+      ["방울 잡기", '"잡아라~ 팡!" 하며 방울을 함께 터뜨립니다', '손 뻗어 터뜨리기로 동작모방·대근육. 터뜨리면 "팡!" 함께 외치기'],
+      ["불어 주세요", '불기를 멈추고 막대를 입에 대며 "불까?" 하고 기다립니다', '"불어" 지시로 수용언어. {child}이(가) 요청하면 바로 불어 강화'],
+      ["높이 낮이", '"높이~" "낮게~" 방향을 바꿔가며 방울을 띄웁니다', '방울을 가리키며 "저기!" 눈맞춤·공동주의 유도'],
+      ["방울 세기", '"하나~ 둘~ 셋!" 방울을 세며 터뜨립니다', '수 세기(인지) 자극. {child}이(가) 따라 소리내면 즉시 반응'],
+      ["방울 차례", '"엄마가 불게~" "{child} 차례~" 번갈아 붑니다', '차례 대사 반복. 기다리면 칭찬으로 사회기술 강화'],
+      ["뚜껑 닫기", '"이제 그만~ 뚜껑 쏙!" 하며 통을 닫습니다', '"닫아" 지시. 닫으면 "다 했다!" 마무리 강화'],
+    ],
+  },
+  케이크: {
+    theme: "생일 축하 케이크 놀이",
+    materials: "조각으로 나뉘는 장난감 케이크, 초·접시·포크(장난감), 인형 1~2개",
+    tip: "먹는 시늉을 어색해하면 인형에게 먼저 먹여 주는 것부터 보여줘 부담을 줄여 주세요.",
+    songs: [
+      '"생일 축하 노래" — 익숙한 축하 노래를 부르며 초 부는 동작을 함께 하기',
+      '"냠냠 노래" — 먹는 시늉과 함께 "냠냠" 부분을 반복해 발성 유도',
+    ],
+    closing: [
+      '카운트다운: "케이크 세 조각만 더 나누고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "그릇 정리 쏙쏙~" 부르며 조각을 통에 담습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["케이크 등장", '{main}을(를) 보여주며 "우와~ 케이크다!" 하고 {child}의 관심을 끕니다', '쳐다보면 3~5초 기다린 뒤 "줄까?" 하고 요청을 유도'],
+      ["초 불기", '"후~ 하고 불어 볼까?" 하며 촛불 끄는 시늉을 크게 보여줍니다', '"후~" 입모양 모방 유도. {child}이(가) 불면 과장되게 "우와 껐다!" 강화'],
+      ["케이크 나누기", '"한 조각 줄게~ 여기!" 하며 조각을 건네고 "엄마도 줘~" 요청합니다', '"줘"·"여기" 지시 반복. 주고받으며 눈 맞추고 미소로 강화'],
+      ["냠냠 먹기", '"아~ 냠냠! 맛있다~" 하며 먹는 흉내를 냅니다', '"아", "냠냠" 짧은 소리 모방 유도. 먹여주면 즉시 "고마워!" 반응'],
+      ["인형에게 먹이기", '{sub}(인형)에게 "너도 먹어~" 하며 케이크를 먹이는 시늉을 합니다', '역할 확장. {child}이(가) 먹이면 "우와 잘한다!" 사회성 강화'],
+      ["케이크 차례", '"엄마 차례~" "{child} 차례~" 번갈아 나누고 먹입니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 강화'],
+      ["그릇 정리", '"다 먹었다~ 정리하자!" 하며 조각을 통에 담습니다', '"넣어" 지시. 넣으면 "다 했다!" 자조·마무리'],
+    ],
+  },
+  소꿉놀이: {
+    theme: "냠냠 소꿉놀이",
+    materials: "소꿉 그릇·냄비·숟가락 세트, 장난감 음식/채소, 담을 바구니",
+    tip: "역할을 어려워하면 '요리사-손님'처럼 역할을 단순하게 정하고, 부모가 먼저 시범을 보인 뒤 차례를 넘겨 주세요.",
+    songs: [
+      '"요리 노래" — "보글보글" 부분을 반복하며 젓는 동작과 발성 연결',
+      '"냠냠 노래" — 먹는 시늉과 함께 "냠냠" 부분을 반복해 모방 유도',
+    ],
+    closing: [
+      '카운트다운: "세 번만 더 요리하고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "그릇 설거지 쏙쏙~" 부르며 통에 담습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["식탁 차리기", '그릇을 놓으며 "맛있는 거 만들자~" 하고 {child}에게 그릇을 건넵니다', '"여기 놔" 지시로 자리 가리키기. 놓으면 "잘했어!" 강화'],
+      ["요리하기", '"보글보글~ 끓는다!" 하며 냄비를 젓는 흉내를 냅니다', '같은 동작 모방 유도. {child}이(가) 저으면 "보글보글!" 함께 언어 모델'],
+      ["냠냠 먹기", '"아~ 냠냠! 맛있다~" 하며 먹는 흉내를 냅니다', '"줘", "아" 짧은 말 유도. {child}이(가) 먹여주면 과장되게 "냠냠!" 반응'],
+      ["새 재료 등장", '{sub}을(를) 꺼내 "어? 이건 뭐지?" 하고 새 자극을 더합니다', '예측을 살짝 깨 주의 모으기. 가리키며 "여기 봐!" 공동주의'],
+      ["나눠 주기", '"엄마도 주세요~" 하고 그릇을 내밀어 나눠 먹습니다', '주고받기로 교대 경험. 건네면 "고마워!" 즉각 강화'],
+      ["소꿉 차례", '"엄마 차례~" "{child} 차례~" 번갈아 요리하고 먹입니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 강화'],
+      ["설거지 정리", '"깨끗이 치우자~ 쏙!" 하며 그릇을 통에 담습니다', '"넣어" 지시. 넣으면 "다 했다!" 자조·마무리'],
+    ],
+  },
+  의사놀이: {
+    theme: "아픈 친구 치료하기",
+    materials: "의사놀이 세트(청진기·주사기·반창고), 인형이나 동물 피규어 2~3개, 담을 가방",
+    tip: "도구에만 관심 있고 놀이가 안 이어지면, 부모나 인형이 '아야!' 하며 아픈 상황을 만들어 아이가 도와주도록 이끌어 주세요.",
+    songs: [
+      '"병원 놀이 노래" — "아야 아야 어디가 아파" 부분을 반복하며 신체부위 가리키기',
+      '"다 나았다 노래" — 치료 후 "다 나았다!" 부분에서 함께 박수치며 기쁨 공유',
+    ],
+    closing: [
+      '카운트다운: "친구 세 명만 더 치료하고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "병원 문 닫아요~ 도구 쏙!" 부르며 가방에 담습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["아픈 친구 발견", '{sub}(인형)의 배를 만지며 "어? 아야! 아프대~" 하고 걱정스런 표정을 짓습니다', '과장된 정서 표현으로 주의 집중. {child}이(가) 쳐다보면 "어디 아파?" 반응 유도'],
+      ["청진기로 진찰", '청진기를 대며 "쿵쿵~ 어디 아픈지 보자" 하고 {child}에게 건넵니다', '"해봐" 지시로 동작 모방 유도. 하면 즉시 "와! 의사 선생님!" 칭찬'],
+      ["주사와 약", '"따끔~ 주사 놓자!" 하며 주사 놓는 시늉을 크게 보여줍니다', '2단계 동작 모방(진찰→주사)을 천천히. {child}이(가) 따라 하면 강화'],
+      ["반창고 붙이기", '"딱! 반창고 붙이자~" 하며 반창고를 붙입니다', '소근육 활동. "{child}도 붙여" 차례 넘기고 성공 시 하이파이브'],
+      ["다 나았다 축하", '"다 나았다~ 우와!" 하며 인형을 활기차게 움직입니다', '과거-현재 대비("아팠는데 나았다"). 함께 박수치며 사회적 강화'],
+      ["의사 차례 바꾸기", '"이번엔 엄마가 아파요! {child} 선생님 도와줘~" 하며 역할을 바꿉니다', '아이 주도 유도. 어떤 행동이든 "그렇게 치료하는구나!" 긍정 반응'],
+      ["도구 정리", '"병원 문 닫아요~ 도구 쏙!" 하며 도구를 가방에 넣습니다', '"넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  엘리베이터: {
+    theme: "위로 아래로 엘리베이터",
+    materials: "장난감 엘리베이터(또는 상자와 끈으로 만든 것), 작은 인형·자동차 2~3개, 숫자 스티커",
+    tip: "버튼 누르기만 반복하면, 부모가 인형이 되어 '태워 주세요' 하고 요청해 아이가 태우고 내리는 상호작용을 만들어 주세요.",
+    songs: [
+      '"올라가요 노래" — "위로 위로" "아래로" 부분에서 몸을 위아래로 움직이며 방향어 학습',
+      '"숫자 노래" — 층을 세며 "하나 둘 셋" 부분을 반복해 수 세기 연결',
+    ],
+    closing: [
+      '카운트다운: "세 번만 더 타고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "친구들 다 내렸어요~ 쏙!" 부르며 정리합니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["엘리베이터 등장", '{main}을(를) 보여주며 "우와~ 올라가는 거다!" 하고 관심을 끕니다', '쳐다보면 3~5초 기다린 뒤 "탈까?" 하고 요청 유도'],
+      ["친구 태우기", '{sub}을(를) 태우며 "친구 타세요~ 문 닫습니다" 합니다', '"태워" 지시로 수용언어. {child}이(가) 태우면 "잘했어!" 강화'],
+      ["위로 올라가요", '"위로~ 위로~ 올라간다!" 하며 엘리베이터를 올립니다', '"위" 방향어와 몸짓을 함께. {child}이(가) 소리·동작 따라 하면 즉시 반응'],
+      ["아래로 내려요", '"아래로~ 쿵! 도착!" 하며 내립니다', '"아래" 방향어 대비 학습. 도착하면 문 여는 시늉 함께'],
+      ["층 세기", '"1층~ 2층~ 3층!" 하며 버튼을 누르고 층을 셉니다', '수 세기(인지) 자극. {child}이(가) 누르면 "여기!" 공동주의'],
+      ["엘리베이터 차례", '"엄마 차례~" "{child} 차례~" 번갈아 버튼을 누릅니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 강화'],
+      ["친구 내리고 정리", '"다 내렸어요~ 이제 쏙!" 하며 인형과 엘리베이터를 정리합니다', '"넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  풍선: {
+    theme: "풍선 퐁퐁 파티",
+    materials: "다양한 색 풍선 3~4개(미리 불어둠), 담을 바구니, 부드러운 매트나 카펫",
+    tip: "풍선을 무서워하면 반쯤만 불어 작게 시작하고, 터지는 소리에 놀라는 아이는 물풍선이나 헝겊풍선으로 바꿔 주세요.",
+    songs: [
+      '"풍선" 동요 — 익숙한 풍선 동요를 색깔 이름을 바꿔 부르고, 마지막 부분에서 함께 풍선을 위로 띄우기',
+      '"퐁퐁 놀이 노래" — 풍선 칠 때 "퐁퐁" 부분을 반복하며 아이의 발성·모방 유도',
+    ],
+    closing: [
+      '카운트다운: "풍선 다섯 번 더 치고 끝~ 다섯·넷·셋·둘·하나!" 하고 예측 가능하게 종료를 알립니다.',
+      '정리 노래: "풍선아 안녕~" 부르며 손 흔들고, 바구니에 "쏙쏙" 넣으며 정리를 놀이처럼 진행합니다.',
+      '다음 활동 예고: "이제 OO 할 거야" 하며 다음 활동을 사진·실물로 보여줘 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["풍선 등장", '{main}을(를) 살짝 흔들어 "바람 소리~" 내고, 머리 위에 올렸다 떨어뜨리며 "어? 어?" 하고 {child}의 흥미를 끕니다', '과장된 표정·소리로 시선을 모읍니다. {child}이(가) 쳐다보면 3~5초 기다려 소리·손짓 요청을 유도'],
+      ["퐁퐁 두드리기", '"퐁퐁!" 하며 {main}을(를) 위로 톡톡 치고 "{child} 차례!" 하고 기다립니다', '동작과 "퐁퐁" 의성어를 함께 모델. {child}이(가) 치면 "{child} 퐁퐁!" 하고 명명하며 강화'],
+      ["풍선 주고받기", '손바닥을 펴며 "줘~" 하고 요청하고, {child}이(가) 주면 "고마워!" 하며 다시 건넵니다', '"줘"·"여기" 지시를 반복. 주고받을 때마다 눈 맞추고 미소로 사회적 강화'],
+      ["어디 갔지? 까꿍", '{main}을(를) 등 뒤에 숨기고 "어? 어디 갔지?" 하다 "짠!" 하고 꺼냅니다', '사라짐·나타남으로 기대감·눈맞춤 유도. {child}이(가) 숨기면 "봐봐!" 보여주기 격려'],
+      ["둥실 날리기", '{main}을(를) 살짝 위로 띄우고 "우와~ 날아간다!" 하며 함께 쫓아갑니다', '대근육·교대 경험. "잡아!" 하고 {child}이(가) 잡으면 과장되게 환호'],
+      ["풍선 차례", '"엄마 차례~" "{child} 차례~" 번갈아 치거나 던집니다', '차례를 짧은 대사로 반복. {child}이(가) 기다리면 "잘 기다렸어!" 사회기술 강화'],
+      ["바구니에 쏙", '바구니를 가리키며 "여기 쏙~" 하고 {main}을(를) 함께 담습니다', '"여기" 공간 지시 반복. 두 손 사용 유도하고 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  "미술/클레이": {
+    theme: "조물조물 클레이놀이",
+    materials: "부드러운 클레이나 점토 여러 색, 찍기 도구·모양틀, 작업 매트, 물티슈",
+    tip: "손에 묻는 걸 싫어하면 지퍼백에 클레이를 넣어 만지게 하거나, 도구로만 눌러 보는 것부터 시작해 감각에 천천히 적응시켜 주세요.",
+    songs: [
+      '"조물조물 노래" — "조물조물" "꾹꾹" 부분을 반복하며 손동작 모방 유도',
+      '"동글동글 노래" — 굴리는 동작과 함께 부르며 소근육 활동 연결',
+    ],
+    closing: [
+      '카운트다운: "세 개만 더 만들고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "클레이 통에 쏙~" 부르며 색깔별로 담습니다.',
+      '다음 활동 예고: "손 닦고 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["클레이 만지기", '{main}을(를) 손에 쥐며 "말랑말랑~ 만져 보자!" 하고 한 덩이를 건넵니다', '"줘?" 하고 잠깐 기다려 요청 유도 후 건네기'],
+      ["꾹꾹 누르기", '"꾹꾹꾹! 눌러~" 하며 클레이를 손가락으로 누릅니다', '같은 동작 모방 유도. {child}이(가) 누르면 "꾹꾹!" 함께 언어 모델'],
+      ["동글동글 굴리기", '"동글동글~ 공 됐다!" 하며 클레이를 굴려 모양을 만듭니다', '두 손 사용 유도. {child}이(가) 굴리면 "동글동글!" 모방'],
+      ["쭉 떼어내기", '"쭉~ 떼었다!" 하며 작은 조각을 떼어 접시에 넣습니다', '조각을 쥐어 주고 접시 가리키며 "여기" 지시. 넣으면 "우와!" 강화'],
+      ["도장 찍기", '{sub}(으)로 클레이에 자국을 내며 "꾹! 자국이다~" 합니다', '시범 후 "{child} 꾹" 차례 넘기기. 찍으면 가리키며 "여기!" 공동주의'],
+      ["클레이 차례", '"엄마 차례~" "{child} 차례~" 번갈아 모양을 만듭니다', '차례 대사 반복. 기다리면 칭찬으로 사회기술 강화'],
+      ["클레이 정리", '"통에 쏙~ 넣자!" 하며 클레이를 통에 담습니다', '"넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  그림책: {
+    theme: "함께 보는 그림책 놀이",
+    materials: "그림이 크고 단순한 그림책 1~2권, 편안히 앉을 자리",
+    tip: "책장을 넘기기만 하고 그림을 안 보면, 소리 나는 부분이나 아이가 좋아하는 그림 한 장에만 머물러 짧게 상호작용해 주세요.",
+    songs: [
+      '"책 넘기는 노래" — "한 장 두 장" 부분을 반복하며 넘기는 동작과 연결',
+      '"이게 뭐야 노래" — 그림을 가리키며 "이게 뭐야?" 부분을 반복해 이름대기 유도',
+    ],
+    closing: [
+      '카운트다운: "세 장만 더 보고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "책 덮어요~ 쏙!" 부르며 제자리에 꽂습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["책 고르기", '{main}을(를) 보여주며 "무슨 책 볼까? 이거?" 하고 {child}에게 고르게 합니다', '쳐다보거나 만지면 "이거 볼까?" 하고 선택을 언어로 확인·강화'],
+      ["한 장 넘기기", '"한 장~ 넘겨 볼까?" 하며 함께 책장을 넘깁니다', '"넘겨" 지시로 소근육·수용언어. {child}이(가) 넘기면 "우와!" 즉시 반응'],
+      ["그림 가리키기", '그림을 가리키며 "어? 이게 뭐야? 멍멍이다!" 하고 이름을 들려줍니다', '가리키기 모델. {child}이(가) 따라 가리키면 "여기!" 공동주의 강화'],
+      ["소리 흉내", '"멍멍!" "빵빵!" 하며 그림 속 소리를 크게 흉내 냅니다', '의성어 모방 유도. {child}이(가) 소리 내면 즉시 "맞아 멍멍!" 확장'],
+      ["어디 있지? 찾기", '"멍멍이 어디 있어?" 하고 {child}이(가) 찾도록 기다립니다', '수용언어(찾기). 찾으면 "찾았다!" 하며 눈 맞추고 강화'],
+      ["책 차례", '"엄마가 넘길게~ 이번엔 {child} 차례~" 번갈아 넘깁니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 강화'],
+      ["책 덮고 정리", '"다 봤다~ 책 덮어요~ 쏙!" 하며 책을 제자리에 둡니다', '"넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  악기: {
+    theme: "둥둥 딩동 악기놀이",
+    materials: "북·탬버린·마라카스 등 간단한 악기 2~3개, 앉을 자리",
+    tip: "소리에 예민해하면 부드러운 소리 악기부터 시작하고 볼륨을 작게, 귀를 막는 아이는 멀리서 천천히 다가가 주세요.",
+    songs: [
+      '"둥둥 노래" — 북 치는 "둥둥" 리듬을 반복하며 동작 모방 유도',
+      '"멈춰 노래" — 노래 중간에 "멈춰!" 하고 소리를 뚝 멈춰 아이의 주의·기다리기 연습',
+    ],
+    closing: [
+      '카운트다운: "세 번만 더 치고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "악기 자러 가요~ 쏙!" 부르며 통에 담습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["악기 등장", '{main}을(를) 흔들며 "짠~ 무슨 소리 날까?" 하고 {child}의 관심을 끕니다', '쳐다보면 3~5초 기다린 뒤 "줄까?" 요청 유도'],
+      ["둥둥 소리 내기", '"둥둥둥!" 하며 악기를 치고 "{child} 차례!" 기다립니다', '동작·소리 모방 유도. {child}이(가) 치면 "둥둥!" 함께 명명·강화'],
+      ["따라 치기", '"엄마 따라 해봐~ 둥! 둥둥!" 하며 간단한 리듬을 보여줍니다', '리듬 모방(모방 영역). 따라 하면 과장되게 "우와 똑같다!" 강화'],
+      ["멈춰! 놀이", '"신나게~ 그리고 멈춰!" 하며 소리를 뚝 멈춥니다', '기다리기·주의집중. {child}이(가) 멈추면 "잘 멈췄어!" 즉시 칭찬'],
+      ["크게 작게", '"크게~ 둥둥! 작게~ 톡톡" 하며 세기를 바꿉니다', '"크게"·"작게" 개념(인지). 가리키며 함께 조절'],
+      ["악기 차례", '"엄마 차례~" "{child} 차례~" 번갈아 연주합니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 강화'],
+      ["악기 정리", '"악기 자러 가요~ 쏙!" 하며 악기를 통에 담습니다', '"넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  퍼즐: {
+    theme: "쏙쏙 맞추는 퍼즐놀이",
+    materials: "꼭지 퍼즐이나 3~6조각 퍼즐, 넓은 판, 담을 통",
+    tip: "잘 안 맞아 짜증 내면, 부모가 방향을 살짝 맞춰 주고 마지막 '누르기'만 아이가 하게 해 성공 경험을 자주 주세요.",
+    songs: [
+      '"쏙 노래" — 조각이 들어갈 때 "쏙!" 부분을 반복하며 성공을 강조',
+      '"어디 있지 노래" — 자리를 찾으며 "어디 있지?" 부분을 반복해 탐색 유도',
+    ],
+    closing: [
+      '카운트다운: "세 조각만 더 맞추고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 노래: "퍼즐 통에 쏙~" 부르며 조각을 담습니다.',
+      '다음 활동 예고: "이제 OO 할 거예요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["퍼즐 조각 보기", '{main} 조각을 들고 "이거 어디에 들어갈까?" 하고 {child}에게 건넵니다', '손 뻗으면 "줘?" 하고 잠깐 기다려 요청 유도 후 건네기'],
+      ["자리 찾기", '"어디 있지~?" 하며 조각과 자리를 함께 살펴봅니다', '탐색 유도. {child}이(가) 자리를 보면 "여기?" 가리키며 공동주의'],
+      ["쏙 맞추기", '"여기에 쏙!" 하며 조각을 끼워 넣는 시범을 보입니다', '마지막 누르기를 {child}이(가) 하게. 맞추면 "쏙! 잘했어!" 즉시 강화'],
+      ["짝짝 칭찬", '조각이 들어가면 "우와 맞췄다!" 하고 함께 박수 칩니다', '성공-강화 연결. 눈 맞추며 기쁨 공유(사회성)'],
+      ["그림 완성 보기", '"어? 멍멍이 나왔네!" 하며 완성된 그림을 가리켜 이름을 말합니다', '완성 그림 명명(어휘). 가리키며 "여기 봐!" 공동주의'],
+      ["퍼즐 차례", '"엄마가 한 조각~ 이번엔 {child} 차례~" 번갈아 맞춥니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 강화'],
+      ["퍼즐 정리", '"조각 통에 쏙~ 넣자!" 하며 조각을 담습니다', '"넣어" 지시. 넣으면 "다 했다!" 마무리'],
+    ],
+  },
+  "그네/미끄럼틀": {
+    theme: "신나는 몸놀이 (그네·미끄럼틀)",
+    materials: "그네나 미끄럼틀(실내용/놀이터), 안전 매트, 편한 옷차림",
+    tip: "무서워하면 부모가 안고 함께 타거나 낮은 높이부터 시작하고, 좋아하면 '밀어 주세요' 요청을 기다렸다 밀어 상호작용을 만들어 주세요.",
+    songs: [
+      '"흔들흔들 노래" — 그네 리듬에 맞춰 "흔들흔들" 부분을 반복하며 발성 유도',
+      '"슝 내려가요 노래" — 미끄럼틀 내려갈 때 "슝~" 부분에서 함께 소리치기',
+    ],
+    closing: [
+      '카운트다운: "세 번만 더 타고 끝~ 셋·둘·하나!" 예고합니다.',
+      '정리 인사: "그네야 안녕~ 미끄럼틀아 안녕~" 하며 손 흔들기 인사합니다.',
+      '다음 활동 예고: "이제 OO 하러 가요" 하며 전환을 돕습니다.',
+    ],
+    scenes: [
+      ["타러 가기", '"우와~ 그네다! 탈까?" 하며 {child}의 관심과 기대를 끕니다', '쳐다보거나 다가오면 "탈까?" 하고 요청(발성·몸짓)을 기다려 유도'],
+      ["밀어 주세요", '그네를 잡고 멈춘 채 "밀어 줄까?" 하고 3~5초 기다립니다', '"밀어" 요청 유도. {child}이(가) 소리·몸짓 내면 바로 밀어 강화'],
+      ["흔들흔들", '"흔들흔들~ 앞으로 뒤로~" 하며 리듬을 붙여 밀어 줍니다', '리듬·의성어 모방 유도. 눈 맞출 때마다 "우와!" 반응'],
+      ["멈춰! 또?", '그네를 살짝 멈추고 "또 할까?" 하고 기다립니다', '기다리기·자발 요청. {child}이(가) "또" 표현하면 즉시 다시 밀기'],
+      ["슝 미끄럼틀", '미끄럼틀 위에서 "준비~ 슝!" 하며 내려가는 시범을 보입니다', '"슝" 의성어 모방·대근육. 내려오면 "도착!" 함께 환호'],
+      ["차례 지키기", '"엄마 먼저~ 이번엔 {child} 차례~" 번갈아 탑니다', '차례 대사 반복. 기다리면 "잘 기다렸어!" 사회기술 강화'],
+      ["다 탔어요 인사", '"이제 그만~ 그네야 안녕!" 하며 손 흔들어 인사합니다', '인사 몸짓 모방. 따라 하면 "잘했어!" 긍정적 마무리'],
+    ],
+  },
+};
+
+const TOYS = [
+  { e: "🚂", n: "기차" }, { e: "🚗", n: "자동차" }, { e: "🧱", n: "블록" },
+  { e: "⚽", n: "공" }, { e: "💭", n: "비눗방울" }, { e: "🎂", n: "케이크" },
+  { e: "🍳", n: "소꿉놀이" }, { e: "🩺", n: "의사놀이" }, { e: "⬆️⬇️", n: "엘리베이터" },
+  { e: "🎈", n: "풍선" }, { e: "🎨", n: "미술/클레이" }, { e: "📚", n: "그림책" },
+  { e: "🎵", n: "악기" }, { e: "🧩", n: "퍼즐" }, { e: "🪁", n: "그네/미끄럼틀" },
+];
+
+const DOMAINS = [
+  "표현언어", "수용언어", "공동주의", "모방",
+  "사회기술", "놀이", "인지", "소근육",
+  "대근육", "자조",
+];
+
+const C = {
+  bg: "#FFF6F4",
+  panel: "#FFFFFF",
+  ink: "#2C2326",
+  sub: "#8A7A7E",
+  line: "#F1DEDF",
+  brand: "#F0768B",
+  brandDark: "#D85A72",
+  brandSoft: "#FFEDEE",
+  blue: "#E8859A",
+  blueSoft: "#FFF0F2",
+  green: "#F0768B",
+  greenSoft: "#FFEDEE",
+};
+
+// 센터 로고 (aac-maker에서 가져옴)
+const LOGO_DATA_URL =
+  "data:image/png;base64,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";
+
+export default function App() {
+  // 로그인/계정
+  const [me, setMe] = useState(null); // {id, email, name, role} | null
+  const [authLoading, setAuthLoading] = useState(true); // 세션 복원 중
+  const [loginId, setLoginId] = useState(""); // 이메일 값을 담음
+  const [loginPw, setLoginPw] = useState("");
+  const [loginErr, setLoginErr] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
+  const [adminView, setAdminView] = useState(false); // 관리자: 계정관리 화면 토글
+
+  const [levels, setLevels] = useState([]);
+  const [toys, setToys] = useState([]);
+  const [customToy, setCustomToy] = useState("");
+  const [domains, setDomains] = useState([]);
+  const [childName, setChildName] = useState("");
+  const [birthDate, setBirthDate] = useState(""); // YYYY-MM-DD
+  // 생년월일 → 월령(개월) 자동 계산
+  const childAge = (() => {
+    if (!birthDate) return "";
+    const b = new Date(birthDate);
+    if (isNaN(b)) return "";
+    const now = new Date();
+    let m =
+      (now.getFullYear() - b.getFullYear()) * 12 +
+      (now.getMonth() - b.getMonth());
+    if (now.getDate() < b.getDate()) m -= 1;
+    return m >= 0 ? String(m) : "";
+  })();
+
+  const [loading, setLoading] = useState(false);
+  const [genChars, setGenChars] = useState(0); // AI 스트리밍 진행(받은 글자수)
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [myPlans, setMyPlans] = useState([]);
+  // 놀잇감 2개 이상일 때 "AI로 하나의 이야기로 엮기" 옵션 (크레딧 필요, 실패 시 템플릿으로 자동 대체)
+  const [useAICombine, setUseAICombine] = useState(false);
+  const [aiNote, setAiNote] = useState(""); // "AI로 생성" / "AI 연결 안 돼 템플릿으로 대체" 등 안내
+  const outRef = useRef(null);
+
+  // ---- 가정 자료: 세 갈래 ----
+  const [branch, setBranch] = useState("play");
+  const [playGoals, setPlayGoals] = useState([]);
+  const [skill, setSkill] = useState("");
+  const [customSkill, setCustomSkill] = useState("");
+  const [skillLevel, setSkillLevel] = useState("mid");
+  const [beh, setBeh] = useState("");
+  const [customBeh, setCustomBeh] = useState("");
+  const [customDanger, setCustomDanger] = useState(false);
+  const [situation, setSituation] = useState("");
+  const [afterText, setAfterText] = useState("");
+  const [comm, setComm] = useState("");
+  const [fn, setFn] = useState("");
+  const [behLevel, setBehLevel] = useState("mid");
+  const [altText, setAltText] = useState("");
+  const [view, setView] = useState("mom"); // 엄마용 | 선생님용
+  const [editing, setEditing] = useState(false); // 고치기 모드
+  const [centerNote, setCenterNote] = useState(""); // 센터에서 본 모습(선생님 입력)
+  const [likes, setLikes] = useState(""); // 좋아하는 것(강화제)
+
+  // 좁은 화면(폰)에서는 좌우 2단 → 위아래 1단으로
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth < 820 : false
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 820);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    try { document.title = "가정 자료"; } catch (e) {}
+  }, []);
+
+  // 저장된 세션으로 로그인 복원 (sessionStorage — 창 닫으면 로그아웃)
+  useEffect(() => {
+    (async () => {
+      try {
+        const user = await getCurrentUser();
+        if (user?.id) {
+          const meta = user.user_metadata || {};
+          setMe({
+            id: user.id,
+            email: user.email,
+            name: meta.display_name || user.email.split("@")[0],
+            role: meta.role || "therapist",
           });
-          clearTimeout(timeoutId);
+        }
+        // 과거 커스텀 토큰 흔적 제거 (보안)
+        sessionStorage.removeItem("esdm_token");
+        sessionStorage.removeItem("esdm_user");
+        localStorage.removeItem("esdm_token");
+        localStorage.removeItem("esdm_user");
+      } catch {}
+      setAuthLoading(false);
+    })();
+  }, []);
 
-          if (response.ok) {
-            const data = await response.json();
-            // claude-relay는 Anthropic 원본 응답을 그대로 돌려준다: { content: [{type:'text', text:'...'}] }
-            const text = (data && (
-              (Array.isArray(data.content) ? data.content.map(b => b.text || '').join('') : '') ||
-              data.text || ''
-            )) || '';
-            const aiParsed = extractJSON(text);
-            if (aiParsed) {
-              // AI가 채운 필드는 AI 것, 빠진 필드는 템플릿으로 보강
-              const merged = { ...fallback };
-              required.forEach((k) => { if (aiParsed[k]) merged[k] = aiParsed[k]; });
-              parsed = merged;
-              usedAI = true;
+  // ---- AI 생성 백엔드 호출 (공용 claude-relay — BIP와 동일 방식) ----
+  // 로그인 토큰이 아니라 anon key 로 호출 (릴레이가 로그인 검증을 하지 않음).
+  // SSE(text/event-stream) 또는 JSON 응답 양쪽을 처리해 { text } 로 반환.
+  // onProgress(받은 글자수) 콜백으로 진행 상황을 알린다.
+  async function api(action, payload = {}, onProgress) {
+    const res = await fetch(ESDM_RELAY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        // 프롬프트가 아니라 '재료'만 전송 — 서버가 프롬프트를 조립한다.
+        levels: payload.levels || [],
+        toys: payload.toys || [],
+        domains: payload.domains || [],
+        childName: payload.childName || "",
+        childAge: payload.childAge || "",
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4000,
+        stream: false,
+      }),
+    });
+    if (!res.ok) {
+      let msg = "AI 서버 응답 오류";
+      try {
+        const e = await res.json();
+        if (e.error) msg = e.error;
+      } catch (_) {}
+      throw new Error(msg);
+    }
+
+    const ctype = res.headers.get("content-type") || "";
+    let text = "";
+    if (ctype.includes("text/event-stream") && res.body) {
+      // SSE 스트림 파싱 (data: {type:"delta", text:"..."} 라인 이어붙임)
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamErr = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line.startsWith("data:")) continue;
+          const jsonStr = line.slice(5).trim();
+          if (!jsonStr) continue;
+          try {
+            const evt = JSON.parse(jsonStr);
+            if (evt.type === "delta" && evt.text) {
+              text += evt.text;
+              if (typeof onProgress === "function") {
+                try { onProgress(text.length); } catch (_) {}
+              }
+            } else if (evt.type === "error") {
+              streamErr = evt.error || "AI 스트림 오류";
             }
-          }
-        } catch (aiErr) {
-          // 네트워크/타임아웃/CORS 등 → 템플릿 폴백 유지
+          } catch (_) {}
         }
-      } else {
-        // AI 미설정: 템플릿이 즉시 뜨면 어색하므로 짧은 지연만
-        await new Promise((r) => setTimeout(r, 600));
       }
+      if (streamErr && !text) throw new Error(streamErr);
+    } else {
+      const data = await res.json();
+      text = Array.isArray(data.content)
+        ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n")
+        : (data.text || "");
+    }
+    return { text };
+  }
 
-      const missing = required.filter(f => !parsed[f]);
-      if (missing.length > 0) throw new Error('가이드 일부가 누락되었습니다.');
+  async function doLogin() {
+    const email = loginId.trim();
+    if (!email || !loginPw) {
+      setLoginErr("이메일과 비밀번호를 입력해 주세요.");
+      return;
+    }
+    setLoginErr("");
+    setLoggingIn(true);
+    try {
+      const result = await signInWithPassword(email, loginPw);
+      if (result.error) {
+        const err = String(result.error).toLowerCase();
+        if (err.includes("invalid") || err.includes("credential")) {
+          setLoginErr("이메일 또는 비밀번호가 일치하지 않습니다.");
+        } else if (err.includes("not confirmed")) {
+          setLoginErr("이메일 확인이 필요합니다. 관리자에게 문의하세요.");
+        } else {
+          setLoginErr(result.error);
+        }
+        return;
+      }
+      const user = result.user;
+      const meta = user?.user_metadata || {};
+      setMe({
+        id: user.id,
+        email: user.email,
+        name: meta.display_name || user.email.split("@")[0],
+        role: meta.role || "therapist",
+      });
+      setLoginPw("");
+    } catch {
+      setLoginErr("서버에 연결할 수 없습니다.");
+    } finally {
+      setLoggingIn(false);
+    }
+  }
 
-      const domObj = DOMAINS.find(d => d.id === (parsed.domainId || domId));
-      const result = {
-        topic: t,
-        childName: childName.trim(),
-        functionInfo: fn,
-        domainId: parsed.domainId || domId,
-        domainLabel: domObj ? domObj.label : '',
-        generatedBy: usedAI ? 'ai' : 'template',
-        otherDetail: fn.id === 'other' ? otherDetail.trim() : '',
-        altBehavior: altBehavior.trim(),
-        ...parsed,
-        level: parsed.level || selectedLevel,
-        createdAt: new Date().toISOString(),
-      };
-      setGuide(result);
-      setCheckTable(Array(7).fill(null).map(() => ({ attempts: '', success: '' })));
+  async function logout() {
+    setMe(null);
+    setResult(null);
+    setMyPlans([]);
+    setAdminView(false);
+    setLoginPw("");
+    setLoginErr("");
+    await signOut();
+  }
 
-      if (supabaseConfigured() && session) {
-        // 본인 소유로 DB 저장, guide_id 회수
-        try {
-          const inserted = await dbInsertGuide({
-            ownerId: session.id,
-            topic: t,
-            childName: childName.trim(),
-            payload: result,
-            childId: (session.role === 'admin' && abaLink) ? abaLink.cid : undefined, // ★ [도구 연결]
+  function toggleLevel(id) {
+    setLevels((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id]; // 최대 2개, 오래된 것 밀어냄
+      return [...prev, id];
+    });
+  }
+
+  function toggleToy(n) {
+    setToys((prev) =>
+      prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+    );
+  }
+
+  function addCustomToy() {
+    const t = customToy.trim();
+    if (t && !toys.includes(t)) setToys((prev) => [...prev, t]);
+    setCustomToy("");
+  }
+
+  function toggleDomain(d) {
+    setDomains((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
+    );
+  }
+
+  function buildPrompt() {
+    const lv = levels
+      .slice()
+      .sort((a, b) => a - b)
+      .map((id) => {
+        const L = LEVELS.find((x) => x.id === id);
+        if (!L) return "레벨 " + id;
+        return `${L.name}(${L.age}, 핵심: ${LEVEL_FOCUS[id] || ""})`;
+      })
+      .join(" + ");
+    const toyStr = toys.join(", ");
+    const domStr = domains.length ? domains.join(", ") : "전 영역 균형";
+
+    // 선택 레벨의 ESDM 커리큘럼 영역·항목
+    const esdm = esdmForLevels(levels);
+    const esdmStr = Object.entries(esdm)
+      .map(([d, items]) => `${d}(${items.join("·")})`)
+      .join(", ");
+
+    const callName = childCall(childName); // 성 뗀 호칭 (예: "민다솔"→"다솔이")
+    const childLine = childName
+      ? `- 아이 호칭: ${callName}${childAge ? ` (${childAge}개월)` : ""}\n  → 장면·전략·집에서 이어가기의 "OO이" 자리에는 반드시 이 호칭 "${callName}"만 사용한다. 성(姓)을 붙이지 말고, 다른 형태로 바꾸지 말 것.`
+      : "";
+
+    return `당신은 ESDM(Early Start Denver Model) 인증 치료사입니다. 아래 조건으로 가정에서 부모가 아이와 진행할 수 있는 JAR(Joint Activity Routine, 공동활동루틴) 계획을 한국어로 작성하세요.
+
+[조건]
+${childLine ? childLine + "\n" : ""}- ESDM 레벨: ${lv}
+- 선호 놀잇감: ${toyStr}
+- 목표 발달 영역: ${domStr}
+
+[해당 레벨 ESDM 커리큘럼 — 이 영역과 항목을 목표·장면에 반드시 반영]
+${esdmStr}
+
+[작성 원칙]
+- ESDM의 공동활동루틴 구조(Setup → Theme → Variation)를 따른다.
+- 선택한 놀잇감을 자연스럽게 하나의 통합 루틴으로 엮는다 (여러 놀잇감이 하나의 이야기로 이어지게).
+- theme.scenes는 정확히 5개(도입 → 전개 → 핵심 → 변화 → 마무리)로 작성한다.
+- goals는 위 ESDM 커리큘럼 영역을 다루되(최대 8개), 각 항목을 루틴 속 구체적 행동으로 녹인다.${
+      domains.length
+        ? `\n- 단, 사용자가 고른 목표 영역(${domStr})을 이 계획의 '중심 목표'로 삼는다: 해당 영역의 goals를 맨 앞에 2개 이상 배치하고 가장 구체적·상세하게 쓰며, scenes의 핵심 장면(전개·핵심)도 이 영역을 집중적으로 자극하도록 구성한다. 나머지 영역은 놀이에서 자연히 함께 일어나는 정도로 1개씩 간략히 포함한다.`
+        : ""
+    }
+- 레벨에 맞는 언어 수준(1어절/2어절/문장 등)과 발달 단계를 반영한다.
+- songs 2개, closing 3개, setup.tip 1개를 반드시 채운다(빈 배열 금지).
+- variations(다르게 놀기) 2개와 home(집에서 이어가기)은 최상위 필드로 반드시 채운다. theme 안에 넣지 말 것. variations는 각각 title·detail 을 갖는 객체 2개, home은 summary·tips(3개)·watch 를 모두 채운다(빈 값 금지).
+- 노래는 실제 가사를 그대로 옮기지 말고 '어떤 노래를 어떻게 활용하는지' 설명으로 쓴다.
+
+[말투 — 아래를 반드시 지킨다]
+1. 부모 대사에는 실제 입으로 내는 의성어·감탄을 넣는다: "부릉~ 슈웅!", "꾹꾹꾹! 산이다~", "쭉~ 떼었다!", "닦닦~ 깨끗!", "와~!" 처럼 소리와 억양이 살아 있게.
+2. 각 장면은 [부모 행동/대사] 와 [전략]이 짝을 이룬다. parent에는 부모가 그대로 따라 할 동작과 대사를, strategy에는 그 행동의 ABA 임상 의도를 쓴다.
+3. strategy에는 구체적 임상 기법을 자연스럽게 녹인다: "3~5초 기다리기", "교대 경험 제공", "언어 모델 제공", "즉각(즉시) 반응", "공동주의 유도", "과장된 표정", "차례 넘기기" 등.
+4. 아이를 "OO이"로 지칭한다(예: "OO이 꾹!", "OO이 차례").
+5. "~할 수 있습니다" 같은 격식체·AI 말투를 쓰지 않는다. 현장 치료사가 부모에게 시연하듯 쓴다.
+
+[참고 예시 — 이 톤과 밀도를 그대로]
+· parent 예: "출발! 슈웅~" 하며 자동차를 언덕에서 굴리고, 과장된 표정으로 "와~!" 박수칩니다
+· strategy 예: 아이가 관심 보이면 다시 건네며 "빵빵? 해봐" 하고 3~5초 기다리기. 아이가 굴리면 같은 동작 함께 모방하며 "부릉부릉!" 언어 모델
+· variation 예: 클레이 대신 비눗방울을 불어 자동차 위로 떨어뜨리며 "뽀글뽀글 세차!" 놀이. "불어" 지시로 수용언어 연습, 손 흔들어 방울 터뜨리기로 동작모방 유도
+
+[출력 형식 — 반드시 아래 JSON만 출력. 마크다운/설명/코드펜스 금지]
+{
+  "title": "루틴 이름 (놀잇감 기반, 짧게)",
+  "setup": {
+    "materials": "선택한 놀잇감 전부에 맞춘 준비물 한 문장",
+    "arrangement": ["환경 배치 항목", "..."],
+    "approach": ["초기 접근 행동 1", "초기 접근 행동 2"],
+    "tip": "아이가 관심 없어 하거나 힘들어할 때 부모가 쓸 수 있는 구체적 팁 1문장"
+  },
+  "goals": [
+    {"domain": "표현언어", "detail": "구체적 목표행동"},
+    {"domain": "수용언어", "detail": "..."}
+  ],
+  "theme": {
+    "name": "선택한 놀잇감들을 하나로 엮은 이야기 주제 이름",
+    "scenes": [
+      {"label": "장면 1: 제목", "parent": "의성어가 살아있는 부모 행동/대사", "strategy": "ABA 기법이 녹은 전략", "coach": "이 레벨 아이에게 맞는 언어 자극 수준을 부모에게 알려주는 한 문장(첫 장면에만 넣고 나머지 장면은 이 필드를 비운다)"}
+    ],
+    "songs": ["놀이에 맞는 추천 노래와 활용법 1", "추천 노래 2"],
+    "closing": ["마무리 전환 신호·정리 루틴 1", "정리 2", "다음 활동 예고 3"]
+  },
+  "variations": [
+    {"title": "변형1] 제목", "detail": "설명"},
+    {"title": "변형2] 제목", "detail": "설명"}
+  ],
+  "home": {
+    "summary": "오늘 루틴에서 집중한 핵심을 부모 언어로 1~2문장",
+    "tips": ["집에서 이어가는 구체적 방법 1", "방법 2", "방법 3"],
+    "watch": "이런 반응이 보이면 좋다는 관찰 포인트 1문장"
+  }
+}
+
+goals는 위 ESDM 커리큘럼 영역(${
+      Object.keys(esdm).join(", ")
+    }) 안에서 구성하되, ${
+      domains.length
+        ? `사용자가 고른 목표 영역(${domStr})을 중심 목표로 하여 맨 앞에 상세히 배치하고, 나머지 영역은 놀이에 자연스럽게 딸려오는 만큼만 간략히 포함한다`
+        : `전 영역을 균형 있게 포함한다`
+    }(최대 8개). theme.scenes는 정확히 5개로, 도입→전개→핵심→변화→마무리 흐름이 자연스럽게 이어지게 구성한다. variations는 2개로, 서로 다른 놀잇감·감각·난이도로 변주한다. home은 부모가 집에서 그대로 실천할 수 있게 따뜻하고 쉬운 말로 쓴다(전문용어 최소화). JSON만 출력한다.`;
+  }
+
+  // 미리보기(아티팩트)에서 API 호출이 막혔을 때 쓰는 데모 생성기.
+  // 선택한 놀잇감/레벨/영역으로 형식이 동일한 샘플 JAR을 구성한다.
+  function buildDemoJAR() {
+    const main = toys[0] || "놀잇감";
+    // 보조 놀잇감: 두 번째 선택이 있으면 사용, 없으면 main과 겹치지 않는 기본값
+    const FALLBACK_SUBS = ["블록", "공", "컵", "인형", "자동차"];
+    const sub =
+      toys[1] && toys[1] !== main
+        ? toys[1]
+        : FALLBACK_SUBS.find((x) => x !== main) || "블록";
+    // 유효한 레벨만 사용 (1~4). 잘못된 값이 오면 가장 가까운 유효 레벨로 보정
+    const validLevels = levels.filter((n) => ESDM_CURRICULUM[n]);
+    const safeLevels = validLevels.length ? validLevels : [1];
+    const lvId = safeLevels.slice().sort((a, b) => a - b)[0] || 1;
+    const lvObj = LEVELS.find((x) => x.id === lvId);
+    const lvName = lvObj ? lvObj.name : "레벨 " + lvId;
+    // 어절: L1 1어절 / L2 1~2어절 / L3 2~3어절 / L4 3~4어절 문장
+    const wordLevel =
+      lvId <= 1 ? "1어절" : lvId === 2 ? "1~2어절" : lvId === 3 ? "2~3어절" : "3~4어절";
+    // 레벨별 언어 자극 수준 (4단계): 소리·몸짓 → 낱말 → 짧은 문장 → 확장 문장·대화
+    const langCue =
+      lvId <= 1
+        ? "소리·몸짓 따라 하기"
+        : lvId === 2
+        ? "짧은 낱말 들려주기"
+        : lvId === 3
+        ? "짧은 문장으로 말 걸기"
+        : "설명·질문을 덧붙여 대화 주고받기";
+    // "언어 모델"을 레벨에 맞게 (4단계)
+    const modelWord =
+      lvId <= 1
+        ? "소리·의성어를 함께 내기"
+        : lvId === 2
+        ? "낱말을 또렷이 들려주기"
+        : lvId === 3
+        ? "짧은 문장으로 말해 주기"
+        : "왜·어떻게를 묻는 질문으로 대화 잇기";
+
+    // 선택 레벨의 ESDM 커리큘럼(영역→항목)
+    const esdm = esdmForLevels(safeLevels);
+    // 사용자가 고른 영역을 앞으로, 나머지 ESDM 영역을 뒤로 정렬
+    const esdmDomains = Object.keys(esdm);
+    const ordered = [
+      ...domains.filter((d) => esdmDomains.includes(d)),
+      ...esdmDomains.filter((d) => !domains.includes(d)),
+    ];
+
+    // 영역별 목표행동: ESDM 항목을 일반 놀이 맥락으로 (놀잇감 이름은 넣지 않아 어떤 놀잇감에도 자연스럽게)
+    const goalTpl = {
+      수용언어: (items) =>
+        `${items.join("·")} — "줘", "여기" 등 ${wordLevel} 지시 듣고 따르기`,
+      표현언어: (items) =>
+        `${items.join("·")} — 의성어·${wordLevel}로 요청하고 이름대기`,
+      공동주의: (items) =>
+        `${items.join("·")} — 함께 보며 눈 맞추기, 가까운 곳 가리키기`,
+      모방: (items) =>
+        `${items.join("·")} — 부모의 동작·소리 따라 하기`,
+      사회기술: (items) =>
+        `${items.join("·")} — 번갈아 주고받기, 차례 지키며 함께 웃기`,
+      놀이: (items) =>
+        `${items.join("·")} — 같은 공간에서 함께·번갈아 놀기`,
+      인지: (items) =>
+        `${items.join("·")} — 같은 것끼리 짝짓기, 개수·순서 다루기`,
+      소근육: (items) =>
+        `${items.join("·")} — 손으로 집고 조작하기, 작은 부분 다루기`,
+      대근육: (items) =>
+        `${items.join("·")} — 앉았다 일어나고 팔 뻗어 주고받기`,
+      자조: (items) =>
+        `${items.join("·")} — 활동 전후 정리·손 씻기 등 스스로 하기`,
+    };
+    const goals = ordered.map((d) => ({
+      domain: d,
+      detail: goalTpl[d]
+        ? goalTpl[d](esdm[d])
+        : `${esdm[d].join("·")} — 놀이 중 ${d} 기회 만들기`,
+    }));
+
+    const presetForMain = TOY_SCENES[main];
+    // 조합 준비물: 선택한 놀잇감마다 전용 준비물이 있으면 합치고, 없으면 이름만 사용
+    const buildMaterials = () => {
+      if (toys.length <= 1) {
+        return presetForMain && presetForMain.materials
+          ? presetForMain.materials
+          : `${main}, ${sub}, 넓은 쟁반이나 책상, 아이와 마주 앉을 공간`;
+      }
+      // 여러 개: 각 놀잇감 전용 준비물에서 공통 '담을 것/공간' 문구는 빼고 핵심만 모음
+      const parts = toys.map((t) => {
+        const p = TOY_SCENES[t];
+        if (!p || !p.materials) return t;
+        return p.materials
+          .replace(/,?\s*담을 [^,]+/g, "")
+          .replace(/,?\s*아이와 마주[^,]*/g, "")
+          .replace(/,?\s*(넓은 )?쟁반[^,]*/g, "")
+          .replace(/,?\s*부드러운 매트[^,]*/g, "")
+          .replace(/,?\s*안전 매트[^,]*/g, "")
+          .trim()
+          .replace(/^,|,$/g, "")
+          .trim();
+      });
+      return parts.join(" · ") + " + 담을 바구니, 아이와 마주 앉을 공간";
+    };
+
+    const demo = {
+      title: `${toys.slice(0, 3).join(", ")} JAR 루틴`,
+      setup: {
+        materials: buildMaterials(),
+        arrangement: [
+          "아이와 마주 보거나 옆에 앉아 쟁반을 가운데 둡니다",
+          `${main}을(를) 아이 손이 닿는 곳에 두어 시선을 끕니다`,
+          `${sub}은(는) 부모 가까이 두고 하나씩 꺼내 줍니다`,
+        ],
+        approach: [
+          `${main}을(를) 아이 앞에서 움직이며 "우와, 뭐야?" 하고 관심을 유도합니다`,
+          `아이가 쳐다보면 즉시 "${main}!" 하고 이름을 들려주며 건넵니다`,
+        ],
+        tip: presetForMain && presetForMain.tip ? presetForMain.tip : null,
+      },
+      goals,
+      theme: (() => {
+        const childTok = childCall(childName);
+        // 주 놀잇감 전용 장면이 있으면 사용
+        const preset = TOY_SCENES[main];
+        if (preset) {
+          // 스토리 흐름을 살려 전체 7장면 사용 (도입~마무리)
+          const pick = preset.scenes.map((_, i) => i);
+          // 레벨별 코칭 한 줄 (같은 스토리라도 레벨마다 지도가 확 달라지게)
+          const levelCoach =
+            lvId <= 1
+              ? `지금은 눈맞춤·소리 모방이 목표예요. "${main}" 이름을 또렷이 들려주고, 말이 안 나와도 소리·몸짓만 보이면 바로 칭찬해 주세요.`
+              : lvId === 2
+              ? `"${main} 줘"처럼 두 낱말을 붙여 들려주고, 아이가 한 낱말이라도 말하거나 몸짓하면 즉시 반응해 주세요.`
+              : lvId === 3
+              ? `"큰 ${main} 줘"처럼 색·크기 말을 넣어 말하고, "이게 뭐야?" 같은 짧은 질문에 아이가 답하도록 기다려 주세요.`
+              : `"왜 ${main}이(가) 멈췄을까?"처럼 이유를 묻고, 지난 일·다음 일을 문장으로 이야기하도록 이끌어 주세요.`;
+          return {
+            name: preset.theme,
+            scenes: pick.map((idx, i) => {
+              const s = preset.scenes[idx];
+              // 레벨에 맞게 "언어 모델" 표현 조정
+              const adjust = (t) => {
+                if (lvId <= 1)
+                  return t
+                    .split("함께 언어 모델").join("소리·의성어 함께 내기")
+                    .split("언어 모델").join("소리·의성어 함께 내기");
+                if (lvId === 2)
+                  return t
+                    .split("함께 언어 모델").join("낱말 함께 말하기")
+                    .split("언어 모델").join("낱말 들려주기");
+                if (lvId >= 4)
+                  return t
+                    .split("함께 언어 모델").join('"왜?", "어떻게?" 물으며 대화 잇기')
+                    .split("언어 모델").join("문장으로 설명 덧붙이기");
+                return t
+                  .split("함께 언어 모델").join("짧은 문장으로 말해 주기")
+                  .split("언어 모델").join("짧은 문장으로 말해 주기"); // L3
+              };
+              const fill = (t) =>
+                t.split("{main}").join(main).split("{sub}").join(sub).split("{child}").join(childTok);
+              return {
+                label: `장면 ${i + 1}: ${s[0]}`,
+                parent: fill(s[1]),
+                strategy: fill(adjust(s[2])),
+                // 첫 장면에만 레벨 코칭을 붙여 반복을 줄이고, 레벨별 차이를 뚜렷하게
+                coach: i === 0 ? fill(levelCoach) : null,
+              };
+            }),
+            songs: preset.songs || null,
+            closing: preset.closing || null,
+          };
+        }
+        // 전용 장면이 없는 놀잇감: 기본 주고받기 틀
+        return {
+          name: `${main} 주고받기 놀이`,
+          scenes: [
+            { label: "장면 1: 관심 끌기", parent: `${main}을(를) 손에 들고 "짠~! ${main} 나왔다~" 하며 ${childTok} 눈높이에서 흔들어 보여줍니다`, strategy: `쳐다보면 3~5초 기다린 뒤 건네며 교대의 첫 경험을 만듭니다. 손을 뻗으면 즉시 ${modelWord}`, coach: lvId <= 1 ? `지금은 눈맞춤·소리 모방이 목표예요. "${main}" 이름을 또렷이 들려주고, 소리·몸짓만 보여도 바로 칭찬해 주세요.` : lvId === 2 ? `"${main} 줘"처럼 두 낱말을 붙여 들려주고, 한 낱말이라도 말하거나 몸짓하면 즉시 반응해 주세요.` : lvId === 3 ? `"큰 ${main} 줘"처럼 색·크기 말을 넣고, 짧은 질문에 아이가 답하도록 기다려 주세요.` : `"왜 ${main}이(가) 멈췄을까?"처럼 이유를 묻고, 지난 일·다음 일을 문장으로 이야기하도록 이끌어 주세요.` },
+            { label: "장면 2: 함께 다루기", parent: `${childTok}와(과) 같이 ${main}을(를) 만지며 "${main} 만져 보자!" 하고 동작을 크게 보여줍니다`, strategy: `${childTok}의 동작을 똑같이 모방해 주며 ${langCue}. 같은 동작 모방으로 사회적 연결 강화` },
+            { label: "장면 3: 주고받기", parent: `"엄마 줘~" 하고 손을 내밀고, 받으면 "고마워!" 하며 "이번엔 ${childTok} 줄게~" 다시 건넵니다`, strategy: `건넬 때마다 "줘", "여기" ${wordLevel} 지시를 반복. 건네면 과장된 표정으로 "우와!" 즉각 강화` },
+            { label: "장면 4: 변화 주기", parent: `${sub}을(를) 쓱 꺼내 "어? 이번엔 ${J(sub, "이다", "다")}!" 하며 놀란 표정으로 새 자극을 더합니다`, strategy: `예측을 살짝 깨뜨려 주의를 다시 모읍니다. 반응하면 ${sub}을(를) 가리키며 "여기 봐!" 공동주의 유도` },
+            { label: "장면 5: 마무리 정리", parent: `"이제 쏙~ 넣자!" 하며 ${main}을(를) 통이나 상자에 넣는 동작을 보여줍니다`, strategy: '손에 쥐어 주고 통을 가리키며 "넣어" 지시. 넣으면 "다 했다!" 즉각 칭찬으로 자조·마무리' },
+          ],
+        };
+      })(),
+      variations: (() => {
+        const vs = [];
+        // 고른 보조 놀잇감마다 "주인공 바꾸기" 변형 (첫 번째 main 제외)
+        const others = toys.slice(1).filter((t) => t && t !== main);
+        const subsForVar = others.length > 0 ? others : [sub];
+        subsForVar.forEach((t, i) => {
+          vs.push({
+            title: `변형${i + 1}] ${t} 주인공 바꾸기`,
+            detail: `${main} 대신 ${t}을(를) 주인공으로 같은 주고받기 루틴 반복. 새 사물 이름을 또렷이 들려주며 어휘 확장, "또 줘" 요청 기회 늘리기`,
           });
-          if (inserted && inserted._linkFailed) setAbaLinkWarn(true);
-          if (inserted && inserted.guide_id) {
-            result.guide_id = inserted.guide_id;
-            result.owner_id = session.id;
-          }
-        } catch (e) { /* 저장 실패해도 화면 표시는 유지 */ }
-        setGuide({ ...result });
-        setHistory([result, ...history.filter(h => h.guide_id !== result.guide_id)].slice(0, 300));
-      } else {
-        const nextHistory = [result, ...history.filter(h => h.topic !== t || h.functionInfo?.id !== fn.id)].slice(0, 100);
-        saveHistory(nextHistory);
-      }
+        });
+        // 마지막에 노래 리듬 변형 추가
+        vs.push({
+          title: `변형${vs.length + 1}] 노래로 리듬 만들기`,
+          detail: `같은 동작에 짧은 노래("주세요~ 주세요~")를 붙여 리듬으로 만듭니다. 노래를 중간에 뚝 멈추고 기다려 아이가 소리·동작으로 "더!"를 요청하게 유도`,
+        });
+        return vs;
+      })(),
+      home: {
+        summary: `오늘은 ${main}을(를) 주고받으며 "줘", "더" 같은 말과 차례 지키기를 연습했어요. 집에서도 짧게, 자주 반복하면 아이가 더 편하게 표현해요.`,
+        tips: [
+          `밥 먹기 전이나 목욕 후처럼 정해진 시간에 ${main} 놀이를 5분씩 꾸준히 해보세요.`,
+          `아이가 손을 뻗으면 바로 주지 말고 "줘?" 하고 1~2초 기다려 말이나 소리를 기다려 주세요.`,
+          `잘했을 때 "우와!" 하고 크게 반응해 주면 아이가 그 행동을 더 하려고 해요.`,
+        ],
+        watch: `아이가 먼저 ${main}을(를) 건네거나 눈을 맞추며 소리를 내면 아주 좋은 신호예요.`,
+      },
+    };
 
-      // 결과 카드로 부드럽게 스크롤
-      setTimeout(() => {
-        const card = document.getElementById('printable-guide');
-        if (card && typeof card.scrollIntoView === 'function') {
-          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // 아이 이름이 있으면 "OO이" 자리에 실제 이름 반영
+    if (childName && childName.trim()) {
+      const nm = childName.trim();
+      const swap = (s) => (typeof s === "string" ? s.split("OO이").join(nm) : s);
+      demo.theme.scenes = demo.theme.scenes.map((sc) => ({
+        ...sc,
+        parent: swap(sc.parent),
+        strategy: swap(sc.strategy),
+      }));
+      if (demo.home) {
+        demo.home.summary = swap(demo.home.summary);
+        demo.home.tips = demo.home.tips.map(swap);
+        demo.home.watch = swap(demo.home.watch);
+      }
+    }
+    return deepFixJosa(demo);
+  }
+
+  // AI 응답 JSON 파서: 정상이면 그대로, max_tokens로 잘렸으면 열린 괄호·따옴표를 닫아 복구 시도.
+  // 복구도 실패하면 예외를 던져 호출부의 catch(→템플릿 대체)로 넘긴다.
+  function parseMaybeTruncatedJSON(s) {
+    try {
+      return JSON.parse(s);
+    } catch (_) {
+      // 잘린 응답 복구: 문자열 안/밖을 추적하며 필요한 닫힘 기호를 뒤에 붙인다.
+      let inStr = false, esc = false;
+      const stack = [];
+      let out = "";
+      for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        out += c;
+        if (inStr) {
+          if (esc) esc = false;
+          else if (c === "\\") esc = true;
+          else if (c === '"') inStr = false;
+        } else {
+          if (c === '"') inStr = true;
+          else if (c === "{" || c === "[") stack.push(c);
+          else if (c === "}" || c === "]") stack.pop();
         }
-      }, 100);
+      }
+      // 문자열 도중 잘렸으면 우선 닫아 본다.
+      if (inStr) out += '"';
+      // 주어진 조각에 맞춰 열린 괄호를 다시 계산해 역순으로 닫는다.
+      const close = (str) => {
+        let is = false, es = false;
+        const st = [];
+        for (let i = 0; i < str.length; i++) {
+          const c = str[i];
+          if (is) { if (es) es = false; else if (c === "\\") es = true; else if (c === '"') is = false; }
+          else { if (c === '"') is = true; else if (c === "{" || c === "[") st.push(c); else if (c === "}" || c === "]") st.pop(); }
+        }
+        let r = str;
+        if (is) r += '"';
+        r = r.replace(/[,:]\s*$/, "");
+        for (let i = st.length - 1; i >= 0; i--) r += st[i] === "{" ? "}" : "]";
+        return r;
+      };
+      try {
+        return JSON.parse(close(out));
+      } catch (_2) {
+        // 1차 실패(예: 키만 있고 값이 없음) → 마지막 온전한 쉼표까지 되돌려 잘라낸다.
+        let cut = out.lastIndexOf(",");
+        while (cut > 0) {
+          try {
+            return JSON.parse(close(out.slice(0, cut)));
+          } catch (_3) {
+            cut = out.lastIndexOf(",", cut - 1);
+          }
+        }
+        throw _2; // 그래도 안 되면 템플릿 대체로 넘어간다.
+      }
+    }
+  }
+
+  // AI 응답에서 variations / home 이 빠졌거나 theme 안에 잘못 들어간 경우를 보정.
+  // 위치가 어긋났으면 끌어올리고, 그래도 비면 템플릿(buildDemoJAR) 값으로 채운다.
+  function normalizeJAR(parsed) {
+    if (!parsed || typeof parsed !== "object") return parsed;
+    const r = { ...parsed };
+    const t = r.theme && typeof r.theme === "object" ? { ...r.theme } : {};
+
+    // variations: 최상위에 없거나 비었으면 theme 안에서 찾아 끌어올림
+    const isNonEmptyArr = (v) => Array.isArray(v) && v.length > 0;
+    if (!isNonEmptyArr(r.variations)) {
+      if (isNonEmptyArr(t.variations)) {
+        r.variations = t.variations;
+        delete t.variations;
+      }
+    }
+    // home: 최상위에 없으면 theme 안에서 찾아 끌어올림
+    const hasHome = (h) =>
+      h && typeof h === "object" && (h.summary || (h.tips && h.tips.length) || h.watch);
+    if (!hasHome(r.home)) {
+      if (hasHome(t.home)) {
+        r.home = t.home;
+        delete t.home;
+      }
+    }
+    r.theme = t;
+
+    // 그래도 비어 있으면 템플릿에서 같은 조건으로 생성한 값으로 채움 (절대 빈 섹션이 남지 않게)
+    if (!isNonEmptyArr(r.variations) || !hasHome(r.home)) {
+      try {
+        const demo = buildDemoJAR();
+        if (!isNonEmptyArr(r.variations) && isNonEmptyArr(demo.variations)) {
+          r.variations = demo.variations;
+        }
+        if (!hasHome(r.home) && hasHome(demo.home)) {
+          r.home = demo.home;
+        }
+      } catch (_) {}
+    }
+    // variations 항목 형식 방어: {title, detail} 아닌 경우 최대한 맞춤
+    if (Array.isArray(r.variations)) {
+      r.variations = r.variations
+        .map((v) => {
+          if (typeof v === "string") return { title: "다르게", detail: v };
+          if (v && typeof v === "object")
+            return { title: v.title || "다르게", detail: v.detail || v.text || "" };
+          return null;
+        })
+        .filter((v) => v && v.detail);
+    }
+    return r;
+  }
+
+  async function generateJAR() {
+    if (levels.length === 0) {
+      setError("ESDM 레벨을 1개 이상 선택해 주세요.");
+      return;
+    }
+    if (toys.length === 0) {
+      setError("선호 놀잇감을 1개 이상 선택해 주세요.");
+      return;
+    }
+    setError("");
+    setAiNote("");
+    setLoading(true);
+    setResult(null);
+    setSaved(false);
+
+    // AI로 엮기를 쓰는 경우: 놀잇감 2개 이상 + 사용자가 옵션 켬 + DEMO_MODE 아님(=크레딧 연결됨)
+    const wantAI = useAICombine && toys.length >= 2 && !DEMO_MODE;
+
+    if (!wantAI) {
+      // 기본 경로: 템플릿 생성 (항상 안정적으로 동작, 크레딧 0)
+      setTimeout(() => {
+        setResult(buildDemoJAR());
+        setLoading(false);
+      }, 300);
+      return;
+    }
+
+    // AI 경로: 조합을 하나의 이야기로 엮기. 실패하면 조용히 템플릿으로 대체.
+    let rawText = "";
+    setGenChars(0);
+    try {
+      const data = await api(
+        "generate",
+        { levels, toys, domains, childName, childAge },
+        (n) => setGenChars(n)
+      );
+      rawText = data.text || "";
+      console.log("[ESDM AI 원본응답]", rawText); // 진단용: F12 → Console 에서 확인
+      let text = rawText.trim();
+      text = text.replace(/```json|```/g, "").trim();
+      const start = text.indexOf("{");
+      if (start !== -1) text = text.slice(start);
+      const parsed = deepFixJosa(parseMaybeTruncatedJSON(text));
+      // variations/home 이 빠졌거나 theme 안에 잘못 들어간 경우 보정
+      const normalized = normalizeJAR(parsed);
+      // AI 결과가 최소 구조를 갖췄는지 검증 (아니면 템플릿으로)
+      if (normalized && normalized.theme && Array.isArray(normalized.theme.scenes) && normalized.theme.scenes.length) {
+        setResult(normalized);
+        setAiNote("AI가 놀잇감을 하나의 이야기로 엮어 생성했어요.");
+      } else {
+        setResult(buildDemoJAR());
+        setAiNote("AI 응답이 불완전해 템플릿으로 대체했어요.");
+      }
     } catch (e) {
-      setError(e.message || '가이드 생성에 실패했습니다.');
+      // 크레딧 소진·연결 실패·502·JSON 파싱 실패 등 → 빈 화면 대신 템플릿으로 자동 대체
+      console.error("[ESDM AI 실패]", e);
+      setResult(buildDemoJAR());
+      setAiNote("AI 연결이 원활치 않아 템플릿으로 대체했어요. (조합은 첫 번째 놀잇감 중심)");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const buildPlainText = (g) => {
-    if (!g) return '';
-    const titlePrefix = g.childName ? `${namePlusReul(g.childName)} 위한 ` : '';
-    const lines = [
-      `[${titlePrefix}집에서 하는 5분 ABA 가이드]`, ``,
-      g.intro, ``,
-      `■ 오늘의 주제: ${g.topic}`,
-    ];
-    if (g.otherDetail) {
-      lines.push(`■ 관찰된 상황: ${g.otherDetail}`);
-    }
-    lines.push(
-      ``,
-      `▶ 예상 기능 살펴보기`, g.function_analysis, ``,
-      `▶ 이번 주 목표`, g.goal, ``,
-      `▶ 준비물`, g.materials, ``,
-      `▶ 5분 실천법`, g.practice, ``,
-      `▶ 기다림의 포인트`, g.waiting, ``,
-      `▶ 강화(칭찬) 타이밍`, g.reinforcement, ``,
-      `▶ 이번 주 집중 관찰`, g.weekly_focus, ``,
-      `▶ 다음 주 우선순위`, g.next_priority, ``,
-      `▶ 이번 주 체크표 (시도 / 성공)`,
-      `월: ___ / ___    화: ___ / ___    수: ___ / ___`,
-      `목: ___ / ___    금: ___ / ___    토: ___ / ___`,
-      `일: ___ / ___`,
-      ``,
-      `※ 매일 저녁 그날의 시도/성공 횟수를 기록해 주세요.`,
-      `다음 센터 방문 시 치료사가 확인하여 다음 단계 결정에 반영합니다.`,
-      ``,
-      `— 검단ABA언어행동연구소`,
-    );
-    return lines.join('\n');
-  };
-
-  const copyToClipboard = async () => {
-    if (!guide) return;
-    const text = buildPlainText(guide);
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyStatus('복사되었습니다');
-      setTimeout(() => setCopyStatus(''), 2000);
-    } catch (e) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e2) {}
-      document.body.removeChild(ta);
-      setCopyStatus('복사되었습니다');
-      setTimeout(() => setCopyStatus(''), 2000);
-    }
-  };
-
-  const handlePrint = () => {
-    if (!guide) return;
-
-    // 가이드 내용을 깔끔한 HTML로 변환
-    const escapeHtml = (str) => String(str || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-
-    const formatMultiline = (text) => {
-      return String(text || '')
-        .split('\n\n')
-        .map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
-        .join('');
-    };
-
-    const checkRows = WEEK_DAYS.map((day, i) => {
-      const c = checkTable[i] || { attempts: '', success: '' };
-      return `
-        <td class="day-cell">
-          <div class="day-label">${day}</div>
-          <div class="day-data">
-            <div><span class="data-label">시도</span> ${escapeHtml(c.attempts) || '___'}</div>
-            <div><span class="data-label">성공</span> ${escapeHtml(c.success) || '___'}</div>
-          </div>
-        </td>
-      `;
-    }).join('');
-
-    const otherDetailBlock = guide.otherDetail
-      ? `<div class="other-detail"><strong>관찰된 상황</strong> ${escapeHtml(guide.otherDetail)}</div>`
-      : '';
-
-    // functionInfo가 없는 옛 데이터를 위한 안전한 기본값 (아래 CSS 색상에서 사용)
-    const fnInfo = guide.functionInfo || { label: '미지정', desc: '', color: '#e07187', id: 'none' };
-
-    const html = `<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<title>${guide.childName ? escapeHtml(namePlusReul(guide.childName)) + ' 위한 ' : ''}집에서 하는 5분 ABA 가이드 - ${escapeHtml(guide.topic)}</title>
-<style>
-  @page { size: A4; margin: 18mm 16mm; }
-  * {
-    box-sizing: border-box;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    color-adjust: exact !important;
-  }
-  @media print {
-    .print-controls { display: none !important; }
-    body { padding: 0; }
-    * {
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-  }
-  body {
-    font-family: "Noto Sans KR", "Apple SD Gothic Neo", -apple-system, sans-serif;
-    color: #3d2530;
-    background: #fff;
-    margin: 0;
-    padding: 24px;
-    line-height: 1.7;
-    font-size: 13.5px;
-  }
-  .header {
-    text-align: center;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #fae8ee;
-    margin-bottom: 20px;
-  }
-  .header-logo {
-    width: 220px;
-    height: auto;
-    margin: 0 auto 12px;
-    display: block;
-  }
-  .title { font-size: 22px; font-weight: 700; color: #a84960; letter-spacing: -0.5px; }
-  .brand { font-size: 12px; color: #8a6571; margin-top: 4px; }
-  .intro {
-    background: #fef7f9;
-    padding: 14px 18px;
-    border-radius: 8px;
-    margin-bottom: 16px;
-  }
-  .intro p { margin: 0 0 8px 0; }
-  .intro p:last-child { margin-bottom: 0; }
-  .topic-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-  .topic-box, .fn-box {
-    flex: 1;
-    padding: 10px 14px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .topic-box { background: #fce4ea; }
-  .fn-box { background: ${fnInfo.color}25; border: 2px solid ${fnInfo.color}; }
-  .topic-label, .fn-label {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 8px;
-    background: #fff;
-    border-radius: 4px;
-    color: #a84960;
-    white-space: nowrap;
-  }
-  .topic-value { font-size: 15px; font-weight: 700; color: #a84960; }
-  .fn-value { font-size: 14px; font-weight: 700; color: ${fnInfo.color}; }
-  .other-detail {
-    padding: 10px 14px;
-    background: #fff;
-    border: 1px dashed #f0a4b5;
-    border-radius: 8px;
-    font-size: 13px;
-    margin-bottom: 14px;
-  }
-  .other-detail strong {
-    background: #fce4ea;
-    color: #a84960;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    margin-right: 8px;
-  }
-  .guide-rows {
-    margin-bottom: 18px;
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid #f4d4dc;
-  }
-  @media print {
-    /* overflow: hidden은 페이지 분할을 차단함 → 인쇄 시 풀어줌 */
-    /* 컨테이너 border/radius도 풀어서 행 단위 분할에 간섭 없도록 */
-    .guide-rows {
-      overflow: visible;
-      border: none;
-      border-radius: 0;
-    }
-    /* 행마다 좌우 테두리 부여 (컨테이너 border 대체) */
-    .guide-row-item {
-      border-left: 1px solid #f4d4dc;
-      border-right: 1px solid #f4d4dc;
-      border-bottom: 1px solid #f4d4dc !important;
-    }
-    .guide-row-item:first-child {
-      border-top: 1px solid #f4d4dc;
-      border-top-left-radius: 8px;
-      border-top-right-radius: 8px;
-    }
-    .guide-row-item:last-child {
-      border-bottom-left-radius: 8px;
-      border-bottom-right-radius: 8px;
-    }
-  }
-  .guide-row-item {
-    display: flex;
-    border-bottom: 1px solid #fae8ee;
-    background: #fff;
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-  .guide-row-item:last-child { border-bottom: none; }
-  .guide-row-item .label-cell {
-    width: 130px;
-    min-width: 130px;
-    padding: 12px 14px;
-    background: #fef7f9;
-    font-weight: 700;
-    color: #a84960;
-    font-size: 13px;
-    border-right: 1px solid #fae8ee;
-    word-break: keep-all;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  .guide-row-item .label-cell.highlight { background: #fce4ea; }
-  .guide-row-item .content-cell {
-    padding: 12px 16px;
-    font-size: 13px;
-    flex: 1;
-  }
-  .guide-row-item .content-cell p { margin: 0 0 8px 0; }
-  .guide-row-item .content-cell p:last-child { margin: 0; }
-  /* 5분 실천법처럼 긴 행은 페이지에 걸쳐 이어지게 하되(1p 하단 공백 방지),
-     각 단계 문단은 페이지 중간에서 잘리지 않게 한다. */
-  .guide-row-item.allow-break {
-    page-break-inside: auto;
-    break-inside: auto;
-  }
-  .guide-row-item.allow-break .content-cell p {
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
-  .check-section {
-    background: #fef7f9;
-    border: 1px solid #f4d4dc;
-    border-radius: 10px;
-    padding: 16px 18px;
-    margin-bottom: 16px;
-    page-break-inside: avoid;
-  }
-  .check-title { font-size: 14px; font-weight: 700; color: #a84960; margin-bottom: 4px; }
-  .check-subtitle { font-size: 12px; color: #8a6571; margin-bottom: 12px; }
-  table.check-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: #fff;
-    border-radius: 6px;
-    overflow: hidden;
-    margin-bottom: 10px;
-  }
-  table.check-table .day-cell {
-    border: 1px solid #fae8ee;
-    text-align: center;
-    padding: 8px 4px;
-    vertical-align: top;
-    width: 14.28%;
-  }
-  .day-label {
-    font-weight: 700;
-    color: #a84960;
-    font-size: 13px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #fae8ee;
-    margin-bottom: 6px;
-  }
-  .day-data { font-size: 12px; line-height: 1.8; }
-  .day-data .data-label { color: #c89aa6; margin-right: 4px; font-size: 11px; }
-  .check-note {
-    font-size: 11px;
-    color: #8a6571;
-    padding: 8px 12px;
-    background: #fff;
-    border: 1px dashed #f4d4dc;
-    border-radius: 6px;
-    line-height: 1.5;
-  }
-  .footer {
-    display: flex;
-    justify-content: center;
-    text-align: center;
-    margin-top: 16px;
-    padding-top: 12px;
-    border-top: 1px solid #fae8ee;
-    font-size: 10.5px;
-    color: #8a6571;
-  }
-  .print-controls {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    display: flex;
-    gap: 8px;
-    z-index: 1000;
-  }
-  .print-controls button {
-    padding: 10px 18px;
-    background: #e07187;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: inherit;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  }
-  .print-controls button.secondary {
-    background: #fff;
-    color: #a84960;
-    border: 1px solid #f0a4b5;
-  }
-</style>
-</head>
-<body>
-  <div class="print-controls">
-    <button onclick="window.print()">다시 인쇄 / PDF 저장</button>
-    <button class="secondary" onclick="window.close()">닫기</button>
-  </div>
-
-  <div class="header">
-    <img class="header-logo" src="${LOGO_DATA_URI}" alt="검단ABA 로고" />
-    <div class="title">${guide.childName ? escapeHtml(namePlusReul(guide.childName)) + ' 위한 ' : ''}집에서 하는 5분 ABA 가이드</div>
-  </div>
-
-  <div class="intro">${formatMultiline(guide.intro)}</div>
-
-  <div class="topic-row">
-    <div class="topic-box">
-      <span class="topic-label">오늘의 주제</span>
-      <span class="topic-value">${escapeHtml(guide.topic)}</span>
-    </div>
-  </div>
-
-  ${otherDetailBlock}
-
-  <div class="guide-rows">
-    <div class="guide-row-item">
-      <div class="label-cell highlight">예상 기능 살펴보기</div>
-      <div class="content-cell">${formatMultiline(guide.function_analysis)}</div>
-    </div>
-    <div class="guide-row-item">
-      <div class="label-cell">이번 주 목표</div>
-      <div class="content-cell">${formatMultiline(guide.goal)}</div>
-    </div>
-    <div class="guide-row-item">
-      <div class="label-cell">준비물</div>
-      <div class="content-cell">${formatMultiline(guide.materials)}</div>
-    </div>
-    <div class="guide-row-item allow-break">
-      <div class="label-cell">5분 실천법</div>
-      <div class="content-cell">${formatMultiline(guide.practice)}</div>
-    </div>
-    <div class="guide-row-item">
-      <div class="label-cell">기다림의 포인트</div>
-      <div class="content-cell">${formatMultiline(guide.waiting)}</div>
-    </div>
-    <div class="guide-row-item">
-      <div class="label-cell">강화(칭찬) 타이밍</div>
-      <div class="content-cell">${formatMultiline(guide.reinforcement)}</div>
-    </div>
-    <div class="guide-row-item">
-      <div class="label-cell" style="background:#fce4ea;">다음 주 우선순위</div>
-      <div class="content-cell">${formatMultiline(guide.next_priority)}</div>
-    </div>
-  </div>
-
-  <div class="check-section">
-    <div class="check-title">이번 주 체크표</div>
-    <div class="check-subtitle">${escapeHtml(guide.weekly_focus)}</div>
-    <table class="check-table">
-      <tr>${checkRows}</tr>
-    </table>
-    <div class="check-note">
-      ※ 매일 저녁, 그날의 시도/성공 횟수를 기록해 주세요. 다음 센터 방문 시 치료사가 확인하여 다음 단계 결정에 반영합니다.
-    </div>
-  </div>
-
-  <div class="footer">
-    <span>© 검단ABA언어행동연구소 · 민다혜 (BCBA) · 본 자료의 무단 복제 및 배포를 금합니다.</span>
-  </div>
-  <script>
-    // 창이 열리면 자동으로 인쇄(PDF 저장) 대화상자를 띄운다.
-    window.addEventListener('load', function () {
-      setTimeout(function () { window.print(); }, 400);
+  // =====================================================================
+  // 가정 자료: 세 갈래 공통 생성 (AI → 앱 확인 → 걸리면 미리 쓴 문구)
+  // =====================================================================
+  function togglePlayGoal(g) {
+    setPlayGoals((prev) => {
+      if (prev.includes(g)) return prev.filter((x) => x !== g);
+      if (prev.length >= 2) return [prev[1], g]; // 최대 2개
+      return [...prev, g];
     });
-  </script>
-</body>
-</html>`;
+  }
+  function pickBehavior(id) {
+    setBeh(id);
+    const b = BEHAVIORS.find((x) => x.id === id);
+    if (b && b.fn) setFn(b.fn); // '해야 할 일 피하기'는 회피를 미리 고름
+  }
 
-    const printWindow = window.open('', '_blank', 'width=900,height=1100');
-    if (!printWindow) {
-      // 팝업 차단된 경우: Blob URL로 새 탭 열기
-      try {
-        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-        setCopyStatus('새 탭에서 인쇄해 주세요');
-        setTimeout(() => setCopyStatus(''), 3000);
-      } catch (e) {
-        setError('새 창 열기가 차단되었습니다. 브라우저 팝업 차단을 해제해 주세요.');
+  function homeInput() {
+    const call = childName.trim() ? childCall(childName) : "아이";
+    const given = givenName(childName) || "";
+    const ageM = childAge ? Number(childAge) : null;
+    const meta = {
+      fullName: childName.trim(),
+      age: ageM != null && !isNaN(ageM) ? `${Math.floor(ageM / 12)}세 ${ageM % 12}개월` : "",
+      teacher: me?.name || "",
+    };
+    if (branch === "play") {
+      return { ...meta, branch, call, given, center: centerNote.trim(), likes: likes.trim(), levels: levels.slice().sort((a, b) => a - b), toys: toys.slice(), goals: playGoals.slice() };
+    }
+    if (branch === "skill") {
+      return { ...meta, branch, call, given, center: centerNote.trim(), likes: likes.trim(), skill: (skill === "__custom" ? customSkill : skill).trim(), level: skillLevel };
+    }
+    const b = BEHAVIORS.find((x) => x.id === beh);
+    const behaviorLabel = beh === "__custom" ? customBeh.trim() : b ? b.label : "";
+    // 상황 글에 던지기·때리기·물기·머리 박기가 나오면 행동 이름과 상관없이 안전 안내를 붙인다
+    const dangerWords = /던지|던져|때리|때려|때림|물어|물기|깨물|박아|박기|박음|할퀴|꼬집|차도|찻길/.test(situation);
+    const danger = (beh === "__custom" ? customDanger : !!(b && b.danger)) || dangerWords;
+    return {
+      ...meta, branch, call, given, center: centerNote.trim(), likes: likes.trim(), behavior: behaviorLabel, behaviorLabel, danger,
+      situation: situation.trim(), after: afterText.trim(), comm: comm.trim(),
+      fn: fn || "unknown", level: behLevel, alt: altText.trim(),
+    };
+  }
+
+  function homeLocal(inp) {
+    const seed = Math.floor(Math.random() * 1000);
+    if (inp.branch === "play") return localPlay(inp, TOY_SCENES);
+    if (inp.branch === "skill") return localSkill(inp, seed);
+    return localBehavior(inp, seed);
+  }
+
+  // 고치기: 자료 글자를 고치면 결과에 바로 반영 (복사·인쇄·저장에 그대로 쓰임)
+  function editResult(path, value) {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const data = JSON.parse(JSON.stringify(prev.data || {}));
+      let o = data;
+      for (let i = 0; i < path.length - 1; i++) o = o[path[i]];
+      o[path[path.length - 1]] = value;
+      return { ...prev, data, edited: true };
+    });
+    setSaved(false);
+  }
+
+  async function generateHome() {
+    const inp = homeInput();
+    if (inp.branch === "play") {
+      if (levels.length === 0) return setError("놀이 단계를 하나 골라 주세요.");
+      if (toys.length === 0) return setError("놀잇감을 하나 이상 골라 주세요.");
+    }
+    if (inp.branch === "skill" && !inp.skill) return setError("연습할 기술을 골라 주세요.");
+    if (inp.branch === "behavior") {
+      if (!inp.behavior) return setError("줄이고 싶은 행동을 골라 주세요.");
+      if (!fn) return setError("이 행동의 이유(예상)를 골라 주세요. 모르면 ‘잘 모르겠음’을 골라 주세요.");
+    }
+    setError("");
+    setAiNote("");
+    setLoading(true);
+    setResult(null);
+    setSaved(false);
+    setView("mom");
+    setEditing(false);
+
+    let data = null, source = "ai", note = "";
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(HOME_AI_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          branch: inp.branch, call: inp.call,
+          levels: inp.levels, toys: inp.toys, goals: inp.goals,
+          skill: inp.skill, level: inp.level,
+          behavior: inp.behavior, situation: inp.situation, after: inp.after, comm: inp.comm, fn: inp.fn, alt: inp.alt,
+          center: inp.center, likes: inp.likes,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok || !j.data) throw new Error(j.error || "AI 서버 응답 오류 " + res.status);
+      const d = cleanData(inp.branch, j.data, inp.fn);
+      // 놀이 목표 이름은 선생님이 고른 이름 그대로 (AI가 글자를 틀리는 경우가 있어 앱이 덮어씀)
+      if (inp.branch === "play" && inp.goals.length && Array.isArray(d.goals)) {
+        d.goals = d.goals.slice(0, inp.goals.length).map((g, i) => ({ ...g, label: inp.goals[i] }));
       }
+      const errs = appCheck(inp.branch, d, { danger: inp.danger, center: inp.center, name: inp.given, fn: inp.branch === "behavior" ? inp.fn : "" });
+      if (errs.length) {
+        console.warn("[가정 자료] 앱 확인에 걸림", errs, d);
+        throw new Error("확인에 걸림: " + errs.join(", "));
+      }
+      data = d;
+    } catch (e) {
+      console.error("[가정 자료 AI]", e);
+      data = homeLocal(inp);
+      source = "local";
+      note = "AI 결과를 쓰지 못해 미리 쓴 문구로 만들었어요. 다시 만들기를 눌러 AI로 다시 해 볼 수 있어요.";
+    }
+    setResult({ v: 2, branch: inp.branch, source, input: inp, data, made: new Date().toISOString() });
+    setAiNote(note);
+    setLoading(false);
+    if (isMobile) setTimeout(() => { try { outRef.current && outRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }, 100);
+  }
+
+  // JAR 저장 / 내 목록 불러오기 / 삭제 (esdm_plans, RLS)
+  async function savePlan() {
+    if (!result) return;
+    try {
+      const isPlay = result.branch === "play";
+      const res = await plansInsert({
+        title: `[${BRANCH_LABEL[result.branch] || "가정 자료"}] ${result.data?.title || ""}`.trim(),
+        levels: isPlay ? result.input?.levels || levels : [],
+        toys: isPlay ? result.input?.toys || toys : [],
+        domains: [BRANCH_LABEL[result.branch] || "놀이 루틴"],
+        plan: { ...result, _child: { name: childName, birthDate } },
+      });
+      if (res.error) {
+        setError("저장에 실패했습니다.");
+        return;
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      loadPlans();
+    } catch (e) {
+      setError("저장에 실패했습니다.");
+    }
+  }
+  async function loadPlans() {
+    try {
+      const rows = await plansList();
+      setMyPlans(rows || []);
+    } catch {}
+  }
+  async function deletePlan(planId) {
+    try {
+      const res = await plansDelete(planId);
+      if (res.error) return;
+      setMyPlans((prev) => prev.filter((p) => p.id !== planId));
+    } catch {}
+  }
+  function openSavedPlan(p) {
+    const nm = (p.plan && p.plan._child && p.plan._child.name) || "";
+    if (p.plan && p.plan.v === 2) {
+      setResult(p.plan);
+      setBranch(p.plan.branch || "play");
+    } else {
+      // 예전 함께놀이 계획 → 새 모양으로 바꿔 보여 줌
+      setResult({
+        v: 2, branch: "play", source: "old",
+        input: { branch: "play", call: nm ? childCall(nm) : "아이", levels: p.levels || [1], toys: p.toys || [] },
+        data: jarToPlay(p.plan || {}),
+      });
+      setBranch("play");
+    }
+    setAiNote("");
+    setView("mom");
+    if (p.levels && p.levels.length) setLevels(p.levels);
+    if (p.toys && p.toys.length) setToys(p.toys);
+    if (p.plan && p.plan._child) {
+      setChildName(p.plan._child.name || "");
+      setBirthDate(p.plan._child.birthDate || "");
+    }
+    setSaved(true);
+  }
+
+  // 로그인 직후 내 저장목록 자동 로드
+  useEffect(() => {
+    if (me) loadPlans();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
+
+  function resultToText(r) {
+    const lines = [];
+    lines.push(`ESDM JAR 공동활동루틴 계획`);
+    lines.push(r.title);
+    if (childName) lines.push(`아이: ${childName}${childAge ? ` (${childAge}개월)` : ""}`);
+    lines.push("");
+    lines.push("① 오늘의 목표");
+    r.goals.forEach((g) => lines.push(` · ${g.domain}: ${g.detail}`));
+    lines.push("");
+    lines.push("② 놀이 준비");
+    lines.push(`준비물: ${r.setup.materials}`);
+    lines.push("환경 배치:");
+    r.setup.arrangement.forEach((a) => lines.push(` - ${a}`));
+    lines.push("시작하기:");
+    r.setup.approach.forEach((a, i) => lines.push(` ${i + 1}. ${a}`));
+    if (r.setup.tip) lines.push(`💡 이럴 땐: ${r.setup.tip}`);
+    lines.push("");
+    lines.push(`③ 함께 놀기 — ${r.theme.name}`);
+    r.theme.scenes.forEach((s) => {
+      lines.push(s.label);
+      lines.push(`  → 부모: ${s.parent}`);
+      lines.push(`  → 전략: ${s.strategy}`);
+      if (s.coach) lines.push(`  → 레벨 지도: ${s.coach}`);
+    });
+    lines.push("");
+    lines.push("④ 다르게 놀기");
+    r.variations.forEach((v) => {
+      lines.push(v.title);
+      lines.push(`  ${v.detail}`);
+    });
+    if (r.home) {
+      lines.push("");
+      lines.push("⑤ 집에서 이어가기");
+      if (r.home.summary) lines.push(r.home.summary);
+      (r.home.tips || []).forEach((t) => lines.push(` - ${t}`));
+      if (r.home.watch) lines.push(r.home.watch);
+    }
+    if (r.theme && r.theme.songs && r.theme.songs.length) {
+      lines.push("");
+      lines.push("⑥ 추천 노래");
+      r.theme.songs.forEach((s) => lines.push(` - ${s}`));
+    }
+    if (r.theme && r.theme.closing && r.theme.closing.length) {
+      lines.push("");
+      lines.push("⑦ 마무리 루틴");
+      r.theme.closing.forEach((c, i) => lines.push(` ${i + 1}. ${c}`));
+    }
+    lines.push("");
+    lines.push("© 검단ABA언어행동연구소 | 민다혜 (BCBA)");
+    lines.push("본 자료는 검단ABA언어행동연구소의 지적재산입니다.");
+    return lines.join("\n");
+  }
+
+  async function copyDoc() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(toText(result, view));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setError("복사에 실패했습니다.");
+    }
+  }
+
+  function printPDF() {
+    if (!result) return;
+    // 고치는 중이면 지금 고치던 글을 먼저 반영하고, 인쇄본에서는 점선 표시를 지운다
+    if (editing) {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      setEditing(false);
+    }
+    if (!outRef.current) return;
+    // 화면 안내 문구(aiNote)는 PDF에 넣지 않는다: 복제본에서 제거 후 인쇄.
+    const clone = outRef.current.cloneNode(true);
+    clone.querySelectorAll(".pdf-ainote, .no-print").forEach((el) => el.remove());
+    clone.querySelectorAll("[contenteditable]").forEach((el) => { el.removeAttribute("contenteditable"); el.removeAttribute("style"); });
+    const html = clone.innerHTML;
+    const w = window.open("", "_blank");
+    if (!w) {
+      setError("팝업이 차단되어 있어요. 팝업을 허용한 뒤 다시 시도해 주세요.");
       return;
     }
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-  };
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+<title>가정 자료</title>
+<style>
+  *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;word-break:keep-all;}
+  @page{margin:12mm;}
+  body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:${C.ink};padding:0;line-height:1.75;}
+  .step{border-radius:12px;padding:18px 20px;margin:14px 0;border:1px solid ${C.line};}
+  .step-orange{background:${C.brandSoft};}
+  .step-blue{background:${C.blueSoft};}
+  .step-green{background:${C.greenSoft};}
+  h3{margin:0 0 10px;font-size:16px;}
+  ul{margin:6px 0;padding-left:20px;}
+  li{margin:4px 0;}
+  .scene{margin:10px 0;}
+  .scene b{display:block;}
+  .arrow{margin:2px 0 2px 8px;color:${C.sub};}
+  .foot{margin-top:24px;font-size:12px;color:${C.sub};text-align:center;}
+  /* 인쇄 시 섹션 제목이 본문에 붙는 것 방지 */
+  .pdf-head{display:block !important;width:100%;margin-bottom:10px !important;}
+  .pdf-theme{display:block !important;margin:2px 0 12px !important;}
+  body > div > div { break-inside: avoid; page-break-inside: avoid; }
+  @media print { body > div > div { break-inside: avoid; page-break-inside: avoid; } }
+</style></head><body>${html}
+</body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+  }
 
-  const loadFromHistory = (item) => {
-    setTopic(item.topic);
-    setChildName(item.childName || '');
-    setSelectedFunction(item.functionInfo);
-    setOtherDetail(item.otherDetail || '');
-    setAltBehavior(item.altBehavior || '');
-    setGuide(item);
-    setShowHistory(false);
-    setIsEditing(false);
-    setEditDraft(null);
-    // 결과 카드로 자동 스크롤
-    setTimeout(() => {
-      const card = document.getElementById('printable-guide');
-      if (card && typeof card.scrollIntoView === 'function') {
-        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 100);
-  };
-
-  const startEditing = () => {
-    if (!guide) return;
-    setEditDraft({
-      childName: guide.childName || '',
-      topic: guide.topic || '',
-      intro: guide.intro || '',
-      function_analysis: guide.function_analysis || '',
-      goal: guide.goal || '',
-      materials: guide.materials || '',
-      practice: guide.practice || '',
-      waiting: guide.waiting || '',
-      reinforcement: guide.reinforcement || '',
-      weekly_focus: guide.weekly_focus || '',
-      next_priority: guide.next_priority || '',
-    });
-    setIsEditing(true);
-    setShowHistory(false);
-    // 가이드 카드 상단으로 스크롤
-    setTimeout(() => {
-      const card = document.getElementById('printable-guide');
-      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
-  };
-
-  const cancelEditing = () => {
-    setIsEditing(false);
-    setEditDraft(null);
-  };
-
-  const saveEditing = async () => {
-    if (!guide || !editDraft) return;
-    const updated = {
-      ...guide,
-      ...editDraft,
-      editedAt: new Date().toISOString(),
-    };
-    setGuide(updated);
-
-    if (supabaseConfigured() && guide.guide_id) {
-      try {
-        await dbUpdateGuide(guide.guide_id, updated, updated.topic, updated.childName);
-      } catch (e) { /* 실패해도 화면은 갱신 */ }
-      setHistory(history.map(h => (h.guide_id === guide.guide_id ? updated : h)));
-    } else {
-      // 보관함의 같은 항목 (createdAt 기준)을 업데이트
-      const nextHistory = history.map(h =>
-        h.createdAt === guide.createdAt ? updated : h
-      );
-      saveHistory(nextHistory);
-    }
-    setIsEditing(false);
-    setEditDraft(null);
-    setCopyStatus('수정 사항이 저장되었습니다');
-    setTimeout(() => setCopyStatus(''), 2500);
-  };
-
-  const updateDraft = (field, value) => {
-    setEditDraft(prev => ({ ...prev, [field]: value }));
-  };
-
-  const removeHistoryItem = (item) => {
-    // item: 가이드 객체(또는 하위호환용 createdAt 문자열)
-    const target = typeof item === 'string' ? history.find(h => h.createdAt === item) : item;
-    if (!target) return;
-    setConfirmAction({
-      message: '이 가이드를 보관함에서 삭제하시겠습니까?',
-      onConfirm: async () => {
-        if (supabaseConfigured() && target.guide_id) {
-          try { await dbDeleteGuide(target.guide_id); } catch (e) {}
-        }
-        const nextHistory = target.guide_id
-          ? history.filter(h => h.guide_id !== target.guide_id)
-          : history.filter(h => h.createdAt !== target.createdAt);
-        saveHistory(nextHistory);
-
-        if (historyFilter) {
-          const stillHasFilter = nextHistory.some(h => {
-            const key = h.childName?.trim() || '__none__';
-            return key === historyFilter;
-          });
-          if (!stillHasFilter) setHistoryFilter('');
-        }
-        setConfirmAction(null);
-      },
-    });
-  };
-
-  const clearAllHistory = () => {
-    if (history.length === 0) return;
-    const isViewingOther = !!viewingTeacherId;
-    const msg = isViewingOther
-      ? `⚠ ${viewingTeacherId} 선생님의 보관함 가이드 ${history.length}개를 모두 삭제합니다.\n이 동작은 되돌릴 수 없습니다.`
-      : `보관함의 모든 가이드 ${history.length}개를 삭제하시겠습니까?\n이 동작은 되돌릴 수 없습니다.`;
-    setConfirmAction({
-      message: msg,
-      onConfirm: async () => {
-        if (supabaseConfigured()) {
-          // 현재 보고 있는 보관함의 가이드들을 DB에서 삭제
-          const toDelete = history.filter(h => h.guide_id).map(h => h.guide_id);
-          for (const gid of toDelete) {
-            try { await dbDeleteGuide(gid); } catch (e) {}
-          }
-        }
-        saveHistory([]);
-        setHistoryFilter('');
-        setConfirmAction(null);
-      },
-    });
-  };
-
-  const updateCheck = (idx, field, value) => {
-    const next = [...checkTable];
-    next[idx] = { ...next[idx], [field]: value };
-    setCheckTable(next);
-  };
-
-  const renderMultiline = (text) => {
-    if (!text) return null;
-    return String(text).split('\n\n').map((para, i) => (
-      <p key={i} style={{ margin: '0 0 12px 0', lineHeight: 1.75 }}>
-        {para.split('\n').map((line, j, arr) => (
-          <React.Fragment key={j}>
-            {line}{j < arr.length - 1 && <br />}
-          </React.Fragment>
-        ))}
-      </p>
-    ));
-  };
-
-  const currentStage = (() => {
-    let stage = LOADING_STAGES[0];
-    for (const s of LOADING_STAGES) if (elapsed >= s.at) stage = s;
-    return stage;
-  })();
-
-  // ── 인증 핸들러 ──
-  const handleLogout = () => {
-    logout();
-    setSession(null);
-    setShowAdminPage(false);
-    setViewingTeacherId(null);
-    setGuide(null);
-    setTopic('');
-    setChildName('');
-    setSelectedFunction(null);
-    setOtherDetail('');
-    setAltBehavior('');
-  };
-
-  // 세션 복원 중에는 로그인 화면 깜빡임 방지용 로딩 화면
-  if (booting) {
+  // ---------- 세션 복원 중 ----------
+  if (authLoading) {
     return (
-      <div style={{
-        minHeight: '100vh', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 16,
-        background: '#fdf5f5',
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: '50%',
-          border: '4px solid #f4d4dc', borderTopColor: '#e07187',
-          animation: 'gdSpin 0.8s linear infinite',
-        }} />
-        <div style={{ color: '#8a6571', fontSize: 14 }}>불러오는 중…</div>
-        <style>{`@keyframes gdSpin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{ ...styles.gate, background: C.bg }}>
+        <div style={{ color: C.sub, fontSize: 14 }}>불러오는 중…</div>
       </div>
     );
   }
 
-  // 로그인 안 됐으면 로그인 화면만 보여줌
-  if (!session) {
-    return <LoginView onLogin={(s) => setSession(s)} />;
+  // ---------- 로그인 게이트 ----------
+  if (!me) {
+    return (
+      <div style={{ ...styles.gate, background: C.bg }}>
+        <div style={styles.gateCard}>
+          <img src={LOGO_DATA_URL} alt="검단ABA" style={styles.logoBadge} />
+          <h1 style={styles.gateTitle}>가정 자료</h1>
+          <p style={styles.gateSub}>놀이 루틴 · 생활 기술 · 행동 대처 — 어머님께 보내는 집에서 하는 5분</p>
+
+          <button
+            style={styles.guideToggle}
+            onClick={() => setShowGuide((v) => !v)}
+          >
+            <span>📖 사용법 안내</span>
+            <span>{showGuide ? "▲" : "▼"}</span>
+          </button>
+
+          {showGuide && (
+            <div style={styles.guideBox}>
+              <div style={styles.guideStep}>
+                <span style={styles.guideNum}>1</span>
+                <div>
+                  <div style={styles.guideStepTitle}>무엇을 보낼지 고르기</div>
+                  <div style={styles.guideStepText}>
+                    놀이 루틴, 생활 기술, 행동 대처 중 하나를 고르면 그에 맞는 것만 물어요.
+                  </div>
+                </div>
+              </div>
+              <div style={styles.guideStep}>
+                <span style={styles.guideNum}>2</span>
+                <div>
+                  <div style={styles.guideStepTitle}>필요한 것만 채우기</div>
+                  <div style={styles.guideStepText}>
+                    아이 이름과 놀잇감·기술·행동 등을 고르세요. 목록에 없으면 직접 입력할 수 있어요.
+                  </div>
+                </div>
+              </div>
+              <div style={styles.guideStep}>
+                <span style={styles.guideNum}>3</span>
+                <div>
+                  <div style={styles.guideStepTitle}>만들기</div>
+                  <div style={styles.guideStepText}>
+                    AI가 아이에 맞게 쓰고 앱이 한 번 더 확인해요. 걸리면 미리 쓴 문구로 바뀌고 화면에 표시돼요.
+                  </div>
+                </div>
+              </div>
+              <div style={styles.guideStep}>
+                <span style={styles.guideNum}>4</span>
+                <div>
+                  <div style={styles.guideStepTitle}>엄마용으로 확인</div>
+                  <div style={styles.guideStepText}>
+                    엄마용에는 어머님께 나갈 내용만, 선생님용에는 설명이 함께 보여요. 원장님 허락 후 보내 주세요.
+                  </div>
+                </div>
+              </div>
+              <div style={styles.guideStep}>
+                <span style={styles.guideNum}>5</span>
+                <div>
+                  <div style={styles.guideStepTitle}>복사·인쇄·저장</div>
+                  <div style={styles.guideStepText}>
+                    카톡용으로 복사하거나 인쇄·PDF로 보내고, 저장하면 목록에서 다시 볼 수 있어요.
+                  </div>
+                </div>
+              </div>
+              <div style={styles.guideNote}>
+                💡 계정(이메일·비밀번호)은 관리자(원장님)에게 문의해 주세요.
+              </div>
+            </div>
+          )}
+          {/* 브라우저 자동완성 차단용 미끼 필드 (화면에 보이지 않음) */}
+          <input type="text" name="username" tabIndex={-1} aria-hidden="true" autoComplete="username" style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none", zIndex: -1 }} />
+          <input type="password" name="password" tabIndex={-1} aria-hidden="true" autoComplete="current-password" style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none", zIndex: -1 }} />
+          <input
+            style={styles.gateInput}
+            type="email"
+            value={loginId}
+            placeholder="이메일"
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
+            onChange={(e) => setLoginId(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doLogin()}
+          />
+          <input
+            style={styles.gateInput}
+            type="password"
+            value={loginPw}
+            placeholder="비밀번호"
+            autoComplete="new-password"
+            autoCorrect="off"
+            spellCheck="false"
+            onChange={(e) => setLoginPw(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doLogin()}
+          />
+          {loginErr && <div style={styles.gateErr}>{loginErr}</div>}
+          <button
+            style={styles.gateBtn}
+            onClick={doLogin}
+            disabled={loggingIn}
+          >
+            {loggingIn ? "로그인 중…" : "로그인 →"}
+          </button>
+          <div style={styles.gateFoot}>
+            © 검단ABA언어행동연구소 | 민다혜 (BCBA)
+            <br />
+            <span style={styles.gateFootSmall}>
+              본 자료는 검단ABA언어행동연구소의 지적재산입니다.
+            </span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  // 관리자가 관리자 페이지 보고 있으면 관리자 페이지만
-  if (showAdminPage && session.role === 'admin') {
+  // ---------- 관리자: 계정 관리 화면 ----------
+  if (me.role === "admin" && adminView) {
     return (
-      <AdminView
-        currentUser={session}
-        onClose={() => setShowAdminPage(false)}
-        onLogout={handleLogout}
-        onViewTeacherHistory={(teacherId) => {
-          setViewingTeacherId(teacherId);
-          setShowAdminPage(false);
-          setShowHistory(true);
-        }}
+      <AdminPanel
+        isMobile={isMobile}
+        onClose={() => setAdminView(false)}
+        onLogout={logout}
+        me={me}
       />
     );
   }
 
+  // 갈래별 색과 고르기 버튼 모양
+  const TH = BRANCH_THEME[branch] || BRANCH_THEME.play;
+  const chipS = (on) => ({ ...styles.chip, ...(on ? { border: `1.5px solid ${TH.main}`, background: TH.soft, color: TH.dark, fontWeight: 700 } : {}) });
+  const cardS = (on) => ({ ...styles.levelCard, padding: "7px 4px", ...(on ? { border: `1.5px solid ${TH.main}`, background: TH.soft } : {}) });
+  const RT = BRANCH_THEME[result?.branch] || TH;
+
+  // ---------- 메인 ----------
   return (
-    <div style={styles.container}>
-      <style>{`
-        @media print {
-          body * { visibility: hidden; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-          #printable-guide, #printable-guide * { visibility: visible; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-          #printable-guide { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
-          .no-print { display: none !important; }
-          .guide-card { box-shadow: none !important; border: 1px solid #f4d4dc !important; }
-          .guide-row, .check-table-print { page-break-inside: avoid; }
-          .check-input { border: 1px solid #f4d4dc !important; background: #fff !important; }
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
-        @keyframes fadeInModal { from { opacity: 0; transform: translate(-50%, -48%); } to { opacity: 1; transform: translate(-50%, -50%); } }
-        .spinner { animation: spin 1.2s linear infinite; }
-        .pulse-dot { animation: pulse 1.4s ease-in-out infinite; }
-        .stage-text { animation: fadeIn 0.4s ease-out; }
-        input:focus, button:focus, textarea:focus { outline: 2px solid #c9a987; outline-offset: 2px; }
-        .fn-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(139,111,71,0.12); }
-        .fav-chip-btn:hover:not(:disabled) { background: #e8d9c5 !important; border-color: #8b6f47 !important; }
-        .fav-chip-btn:active:not(:disabled) { transform: scale(0.96); }
-        button[aria-label="삭제"]:hover { background: #fbecec !important; color: #a85a3e !important; border-color: #f0c8c0 !important; }
-        button[style*="14px"][style*="cursor: pointer"]:active { transform: scale(0.96); }
-
-        /* ── 태블릿 (max-width: 1024px) ── */
-        @media (max-width: 1024px) {
-          .app-fn-grid { grid-template-columns: repeat(3, 1fr) !important; }
-        }
-
-        /* ── 모바일/소형 태블릿 (max-width: 768px) ── */
-        @media (max-width: 768px) {
-          .app-header-inner { padding: 12px 14px !important; flex-wrap: wrap !important; gap: 10px !important; }
-          .app-header-logo { width: 40px !important; height: 40px !important; }
-          .app-brand-name { font-size: 15px !important; }
-          .app-brand-sub { font-size: 11px !important; }
-          .app-history-btn,
-          .app-manual-btn,
-          .app-admin-btn,
-          .app-logout-btn { padding: 8px 12px !important; font-size: 12px !important; }
-          .app-user-badge { padding: 5px 10px !important; font-size: 11px !important; }
-
-          .app-controls { padding: 16px !important; margin: 12px 12px 0 12px !important; }
-
-          .app-fn-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
-          .fn-card { padding: 14px 10px !important; min-height: 64px !important; }
-
-          .app-action-row { padding: 0 12px !important; flex-wrap: wrap !important; gap: 8px !important; }
-          .app-action-btn { padding: 10px 14px !important; font-size: 13px !important; flex: 1 1 auto !important; min-height: 44px !important; }
-
-          .app-guide-card { margin: 14px 12px !important; padding: 18px 16px !important; }
-          .app-guide-header { gap: 10px !important; padding-bottom: 14px !important; margin-bottom: 14px !important; }
-          .app-guide-logo { width: 70px !important; }
-          .app-guide-title { font-size: 16px !important; line-height: 1.45 !important; }
-
-          /* 가이드 표: 라벨/내용을 위아래로 쌓기 */
-          .app-guide-row { flex-direction: column !important; }
-          .app-row-label {
-            width: 100% !important;
-            min-width: 0 !important;
-            padding: 10px 14px !important;
-            font-size: 13px !important;
-            border-right: none !important;
-            border-bottom: 1px solid #fae8ee !important;
-          }
-          .app-row-content { padding: 12px 14px !important; font-size: 13.5px !important; }
-
-          /* 체크표: 가로 스크롤 허용 */
-          .app-check-section { padding: 14px !important; }
-          .app-check-table-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; }
-          .app-check-table { min-width: 520px !important; }
-
-          /* 드로어: 전체 폭 */
-          .app-drawer-panel { width: 100% !important; max-width: 100% !important; }
-
-          /* 모달: 화면 폭에 맞춤 */
-          .app-confirm-modal { width: calc(100vw - 32px) !important; max-width: 360px !important; }
-        }
-
-        /* ── 좁은 모바일 (max-width: 480px) ── */
-        @media (max-width: 480px) {
-          .app-fn-grid { grid-template-columns: 1fr 1fr !important; }
-          .app-action-row { flex-direction: column !important; }
-          .app-action-btn { width: 100% !important; flex: none !important; }
-          .app-guide-title { font-size: 15px !important; }
-          .app-brand-name { font-size: 14px !important; }
-        }
-      `}</style>
-
-      <div className="no-print app-header" style={styles.header}>
-        <div style={styles.headerInner} className="app-header-inner">
-          <div style={styles.headerLeft} className="app-header-left">
-            <img src={LOGO_DATA_URI} alt="검단ABA 로고" style={styles.headerLogo} className="app-header-logo" />
+    <div style={{ ...styles.app, background: C.bg, padding: isMobile ? 10 : 20 }}>
+      <div
+        style={{
+          ...styles.shell,
+          gridTemplateColumns: isMobile ? "1fr" : "360px 1fr",
+        }}
+      >
+        {/* 좌측 패널 */}
+        <aside style={styles.left}>
+          <div style={styles.brandRow}>
+            <img src={LOGO_DATA_URL} alt="검단ABA" style={styles.logoBadgeSm} />
             <div>
-              <div style={styles.brandName} className="app-brand-name">검단ABA언어행동연구소</div>
-              <div style={styles.brandSub} className="app-brand-sub">ABA 기반 가정 연계 5분 가이드</div>
+              <div style={styles.brandTitle}>가정 자료</div>
+              <div style={styles.brandSub}>
+                놀이 루틴 · 생활 기술 · 행동 대처
+              </div>
             </div>
           </div>
-          <div className="app-header-actions" style={styles.headerActions}>
-            {/* 로그인된 사용자 표시 */}
-            <div style={styles.userBadge} className="app-user-badge">
-              <span style={styles.userBadgeName}>{session.name}</span>
-              <span style={styles.userBadgeRole}>
-                {session.role === 'admin' ? '관리자' : '선생님'}
-              </span>
-            </div>
 
-            {/* 관리자 전용: 관리자 페이지 진입 */}
-            {session.role === 'admin' && (
-              <button
-                onClick={() => setShowAdminPage(true)}
-                className="app-admin-btn"
-                style={{
-                  ...styles.historyBtn,
-                  background: '#fff',
-                  color: COLORS.primaryDark,
-                  border: `1px solid ${COLORS.border}`,
-                }}
-              >
-                계정 관리
-              </button>
-            )}
-
-            {/* 관리자가 특정 선생님 보관함 보고 있을 때 표시 */}
-            {viewingTeacherId && (
-              <button
-                onClick={() => setViewingTeacherId(null)}
-                style={{
-                  ...styles.historyBtn,
-                  background: COLORS.accentLight,
-                  color: COLORS.primaryDark,
-                  border: `1px solid ${COLORS.primary}`,
-                }}
-              >
-                ← 내 보관함으로
-              </button>
-            )}
-
-            <button
-              onClick={() => setShowManual(true)}
-              className="app-manual-btn"
-              style={{
-                ...styles.historyBtn,
-                background: '#fff',
-                color: COLORS.primaryDark,
-                border: `1px solid ${COLORS.border}`,
-              }}
-              aria-label="사용 설명서 열기"
-            >
-              사용 설명서
-            </button>
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className="app-history-btn"
-              style={{
-                ...styles.historyBtn,
-                background: showHistory ? COLORS.primary : COLORS.accentLight,
-                color: showHistory ? '#fff' : COLORS.primaryDark,
-              }}
-            >
-              보관함 ({history.length})
-            </button>
-            <button
-              onClick={handleLogout}
-              className="app-logout-btn"
-              style={{
-                ...styles.historyBtn,
-                background: '#fff',
-                color: COLORS.error,
-                border: `1px solid ${COLORS.border}`,
-              }}
-              aria-label="로그아웃"
-            >
-              로그아웃
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 관리자가 선생님 보관함 조회 중일 때 안내 배너 */}
-      {viewingTeacherId && (
-        <div className="no-print" style={styles.viewingBanner}>
-          <span style={styles.viewingBannerIcon}>{viewingTeacherId === '__ALL__' ? '📂' : '👁'}</span>
-          <div style={{ flex: 1 }}>
-            {viewingTeacherId === '__ALL__' ? (
-              <>
-                <strong>전체 통합 보기 — 모든 선생님의 가이드를 조회 중입니다.</strong>
-                <div style={styles.viewingBannerSub}>
-                  아래 보관함에 모든 선생님이 만든 가이드가 함께 표시됩니다.
-                  본인 화면으로 돌아가려면 헤더의 '내 보관함으로'를 누르세요.
-                </div>
-              </>
-            ) : (
-              <>
-                <strong>{viewingTeacherId} 선생님의 보관함을 조회 중입니다.</strong>
-                <div style={styles.viewingBannerSub}>
-                  여기서 만드는 새 가이드는 이 선생님 보관함에 저장됩니다.
-                  본인 보관함으로 돌아가려면 헤더의 '내 보관함으로'를 누르세요.
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ★ [도구 연결] 통합본에서 연 경우 — 관리자 화면에만 */}
-      {session?.role === 'admin' && abaLink && !isEditing && (
-        <div className="no-print" style={{ margin: '0 0 12px', padding: '10px 14px', background: '#fff', border: '1.5px solid #f4d4dc', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#a84960' }}>🔗 통합본 · {abaLink.name || '이 아이'} 기록에 연결됨</span>
-          <span style={{ fontSize: 12, color: '#8a6571', flex: 1, minWidth: 200 }}>
-            여기서 만드는 가이드가 통합본 '가정 연계'에 모입니다.
-            {abaLinkWarn && <b style={{ color: '#B45309' }}> 방금 가이드는 연결 없이 저장됐습니다(SQL 확인 필요).</b>}
-          </span>
-          <button onClick={() => { clearAbaLink(); setAbaLink(null); setAbaLinkWarn(false); }}
-            style={{ border: '1px solid #f4d4dc', background: '#fff', color: '#a84960', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
-            연결 해제
-          </button>
-        </div>
-      )}
-
-      <div className="no-print app-controls" style={{ ...styles.controls, display: isEditing ? 'none' : 'block' }}>
-        {/* Step 1: 아동 이름 */}
-        <div style={styles.stepLabel}>
-          <span style={styles.stepNum}>1</span>
-          <span>아동 이름</span>
-          <span style={styles.stepHint}>(성 빼고 이름만 쓰세요 · 비워두면 "아이"로 표기됩니다)</span>
-        </div>
-        <input
-          type="text"
-          value={childName}
-          onChange={(e) => setChildName(e.target.value)}
-          placeholder="예: 다솔, 서연 (성 없이 이름만)"
-          style={{ ...styles.input, width: '100%', marginBottom: '20px' }}
-          disabled={loading}
-        />
-
-        {/* Step 2: 주제 입력 */}
-        <div style={styles.stepLabel}>
-          <span style={styles.stepNum}>2</span>
-          <span>오늘의 주제 입력</span>
-        </div>
-        <div style={styles.inputRow}>
-          <input
-            ref={inputRef}
-            type="text"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="예: 포크로 간식 찍어 먹기"
-            style={styles.input}
-            disabled={loading}
-          />
-          <button
-            onClick={addToFavorites}
-            disabled={!topic.trim() || favorites.includes(topic.trim())}
-            style={{
-              ...styles.secondaryBtn,
-              opacity: (!topic.trim() || favorites.includes(topic.trim())) ? 0.4 : 1,
-            }}
-          >
-            ★ 즐겨찾기
-          </button>
-        </div>
-
-        <div style={styles.favList}>
-          {favorites.map((f) => {
-            const isActive = topic.trim() === f;
-            return (
-              <div key={f} style={styles.favChipWrap}>
+          <div style={styles.userBar}>
+            <span style={styles.userName}>
+              {me.name}
+              {me.role === "admin" && <span style={styles.adminTag}>관리자</span>}
+            </span>
+            <span style={{ display: "flex", gap: 6 }}>
+              {me.role === "admin" && (
                 <button
-                  type="button"
-                  onClick={() => selectFavorite(f)}
-                  disabled={loading}
-                  className="fav-chip-btn"
+                  style={styles.miniBtn}
+                  onClick={() => setAdminView(true)}
+                >
+                  계정 관리
+                </button>
+              )}
+              <button style={styles.miniBtn} onClick={logout}>
+                로그아웃
+              </button>
+            </span>
+          </div>
+
+          {/* 갈래 고르기: 갈래마다 색이 다름 (놀이=분홍, 생활 기술=초록, 행동 대처=주황) */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginBottom: 14 }}>
+            {BRANCHES.map((b) => {
+              const on = branch === b.id;
+              const t = BRANCH_THEME[b.id];
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => { if (b.id !== branch) setCenterNote(""); setBranch(b.id); setError(""); }}
+                  aria-pressed={on}
                   style={{
-                    ...styles.favChipBtn,
-                    background: isActive ? COLORS.accent : '#fff',
-                    borderColor: isActive ? COLORS.primary : COLORS.border,
-                    color: isActive ? '#fff' : COLORS.text,
-                    fontWeight: isActive ? 700 : 500,
+                    padding: "10px 4px 9px", borderRadius: 12, cursor: "pointer", textAlign: "center",
+                    border: `2px solid ${on ? t.main : C.line}`, background: on ? t.soft : "#fff",
+                    boxShadow: on ? `inset 0 4px 0 ${t.main}` : "none",
                   }}
                 >
-                  {f}
+                  <div style={{ fontSize: 18, lineHeight: 1 }}>{t.icon}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: on ? t.dark : C.ink, marginTop: 4 }}>{b.label}</div>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => removeFavorite(f)}
-                  style={styles.favChipRemoveBtn}
-                  title="삭제"
-                  aria-label={`${f} 삭제`}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Step 3: 예상 행동 기능 선택 */}
-        <div style={{ ...styles.stepLabel, marginTop: '24px' }}>
-          <span style={styles.stepNum}>3</span>
-          <span>예상 행동 기능 선택</span>
-          <span style={styles.stepHint}>(아동이 왜 이 행동을 할 것 같은지)</span>
-        </div>
-
-        <div style={styles.fnGuideBox}>
-          여러 기능이 섞여 있어도 <strong>이번 주는 한 가지만</strong> 선택해 주세요.
-          한 번에 하나씩 다루는 것이 어머님과 아동 모두에게 가장 효과적입니다.
-          기능 파악이 어려우시다면 <strong>"기타 / 복합"</strong>을 선택하시면 됩니다.
-        </div>
-
-        <div style={styles.fnGrid} className="app-fn-grid">
-          {FUNCTIONS.map((fn) => {
-            const isSelected = selectedFunction?.id === fn.id;
-            return (
-              <button
-                key={fn.id}
-                onClick={() => setSelectedFunction(fn)}
-                disabled={loading}
-                className="fn-card"
-                style={{
-                  ...styles.fnCard,
-                  borderColor: isSelected ? fn.color : COLORS.borderLight,
-                  background: isSelected ? `${fn.color}15` : '#fff',
-                  boxShadow: isSelected ? `0 0 0 2px ${fn.color}40` : 'none',
-                }}
-              >
-                <div style={{ ...styles.fnLabel, color: isSelected ? fn.color : COLORS.primaryDark }}>
-                  {fn.label}
-                </div>
-                <div style={styles.fnDesc}>{fn.desc}</div>
-                <div style={styles.fnExample}>{fn.example}</div>
-              </button>
-            );
-          })}
-        </div>
-
-        {selectedFunction?.id === 'other' && (
-          <div style={styles.otherBox}>
-            <div style={styles.otherLabel}>
-              상황을 짧게 적어주세요 <span style={styles.otherHint}>(선택 입력)</span>
-            </div>
-            <textarea
-              value={otherDetail}
-              onChange={(e) => setOtherDetail(e.target.value)}
-              placeholder="예: 평소엔 괜찮은데 형이 옆에 있으면 갑자기 소리지르기 시작함. 형이 자기 장난감을 가져가는 것 같진 않은데 이유를 모르겠음."
-              style={styles.otherTextarea}
-              rows={3}
-              disabled={loading}
-            />
-            <div style={styles.otherNote}>
-              관찰된 상황을 적어주시면 더 정확한 가이드를 만들 수 있습니다.
-            </div>
-          </div>
-        )}
-
-        {/* Step 3.5: 영역 (자동 판별, 선택적으로 변경 가능) */}
-        <div style={{ ...styles.stepLabel, marginTop: '24px' }}>
-          <span style={styles.stepNum}>+</span>
-          <span>연습 영역 <span style={styles.otherHint}>(자동으로 정해집니다 · 필요하면 변경)</span></span>
-        </div>
-        <select
-          value={selectedDomain}
-          onChange={(e) => setSelectedDomain(e.target.value)}
-          disabled={loading}
-          style={styles.domainSelect}
-        >
-          <option value="auto">
-            자동 판별{topic.trim() ? ` (현재: ${(DOMAINS.find(d => d.id === detectDomain(topic)) || {}).label || '사회성·상호작용'})` : ''}
-          </option>
-          {DOMAINS.map((d) => (
-            <option key={d.id} value={d.id}>{d.label}</option>
-          ))}
-        </select>
-        <div style={styles.otherNote}>
-          주제에 따라 실천법·준비물·목표가 영역에 맞게 채워집니다. 양치·신발은 자조, 눈맞춤·차례는 사회성처럼 자동 분류됩니다.
-        </div>
-
-        {/* Step 3.5: 아동 수준 */}
-        <div style={{ ...styles.stepLabel, marginTop: '24px' }}>
-          <span style={styles.stepNum}>★</span>
-          <span>아동 수준</span>
-          <span style={styles.stepHint}>(현재 발달 단계에 맞춰 내용이 달라집니다)</span>
-        </div>
-        <div style={styles.levelRow}>
-          {LEVELS.map((lv) => {
-            const curDom = (selectedDomain && selectedDomain !== 'auto') ? selectedDomain : (topic.trim() ? detectDomain(topic) : 'language');
-            const hint = (LEVEL_HINTS[curDom] || {})[lv.id] || '';
-            const active = selectedLevel === lv.id;
-            return (
-              <button
-                key={lv.id}
-                onClick={() => setSelectedLevel(lv.id)}
-                disabled={loading}
-                style={{ ...styles.levelBtn, ...(active ? styles.levelBtnActive : {}) }}
-              >
-                <span style={styles.levelBtnLabel}>{lv.label}</span>
-                <span style={styles.levelBtnHint}>{hint}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ★ [대신할 행동] 도전행동 주제일 때만 보이는 칸 */}
-        {(() => {
-          const curDom = (selectedDomain && selectedDomain !== 'auto') ? selectedDomain : (topic.trim() ? detectDomain(topic) : '');
-          const tSet = TOPIC_TEMPLATES.find(x => x.fields === matchTopicTemplate(topic));
-          const needsAlt = curDom === 'behavior' || (tSet && ['screaming', 'tantrum', 'aggression'].includes(tSet.id));
-          if (!needsAlt) return null;
-          return (
-            <>
-              <div style={{ ...styles.stepLabel, marginTop: '24px' }}>
-                <span style={styles.stepNum}>+</span>
-                <span>대신할 행동 <span style={styles.otherHint}>(선택 입력)</span></span>
-              </div>
-              <input
-                type="text"
-                value={altBehavior}
-                onChange={(e) => setAltBehavior(e.target.value)}
-                placeholder="예: 그만 카드 짚기 / '도와주세요' 말하기"
-                style={styles.domainSelect}
-                disabled={loading}
-              />
-              <div style={styles.otherNote}>
-                적으시면 중간·상위 단계 가이드의 목표·실천법에 이 행동이 들어갑니다(초기 단계는 안전이 먼저라 넣지 않음). 비워 두면 예시(카드 짚기 등)가 들어갑니다.
-              </div>
-            </>
-          );
-        })()}
-
-        {/* Step 4: 생성 */}
-        <div style={{ ...styles.stepLabel, marginTop: '24px' }}>
-          <span style={styles.stepNum}>4</span>
-          <span>가이드 생성</span>
-        </div>
-
-        <button
-          onClick={() => generateGuide()}
-          disabled={loading || !topic.trim() || !selectedFunction}
-          style={{
-            ...styles.primaryBtn,
-            width: '100%',
-            opacity: (loading || !topic.trim() || !selectedFunction) ? 0.4 : 1,
-            cursor: (loading || !topic.trim() || !selectedFunction) ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {loading ? '생성 중...' : '가이드 생성하기'}
-        </button>
-
-        {error && <div style={styles.error}>{error}</div>}
-      </div>
-
-      {showHistory && (
-        <>
-          <div
-            className="no-print"
-            onClick={() => setShowHistory(false)}
-            style={styles.drawerOverlay}
-          />
-          <div className="no-print app-drawer-panel" style={styles.drawerPanel}>
-            <div style={styles.drawerHeader}>
-              <div style={styles.drawerTitle}>보관함 ({history.length})</div>
-              <div style={styles.drawerHeaderActions}>
-                {history.length > 0 && (
-                  <button onClick={clearAllHistory} style={styles.historyClearBtn}>
-                    전체 삭제
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowHistory(false)}
-                  style={styles.drawerCloseBtn}
-                  aria-label="보관함 닫기"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
-            <div style={styles.drawerBody}>
-              {history.length === 0 ? (
-                <div style={styles.historyEmpty}>
-                  아직 생성한 가이드가 없습니다.<br />
-                  주제를 입력하고 가이드를 만들어 보세요.
-                </div>
-              ) : (() => {
-                const isAllView = viewingTeacherId === '__ALL__';
-
-                // 주어진 항목들을 아동별로 그룹핑해서 렌더하는 헬퍼
-                const renderChildGroups = (items, keyPrefix) => {
-                  const groups = {};
-                  items.forEach(h => {
-                    const key = h.childName?.trim() || '__none__';
-                    if (!groups[key]) groups[key] = [];
-                    groups[key].push(h);
-                  });
-                  const childNames = Object.keys(groups).sort((a, b) => {
-                    if (a === '__none__') return 1;
-                    if (b === '__none__') return -1;
-                    return a.localeCompare(b, 'ko');
-                  });
-                  // 필터는 통합 뷰가 아닐 때만 적용(선생님 폴더 안에서는 필터 미적용)
-                  const useFilter = !isAllView;
-                  const filterActive = useFilter && historyFilter && groups[historyFilter]?.length > 0;
-                  const filtered = filterActive ? { [historyFilter]: groups[historyFilter] } : groups;
-                  const filteredKeys = filterActive ? [historyFilter] : childNames;
-
-                  return (
-                    <>
-                      {/* 아동 이름 필터 칩 (내 보관함/개별 선생님 조회에서만) */}
-                      {useFilter && childNames.length > 1 && (
-                        <div style={styles.filterBar}>
-                          <button
-                            onClick={() => setHistoryFilter('')}
-                            style={{
-                              ...styles.filterChip,
-                              background: !filterActive ? COLORS.primary : '#fff',
-                              color: !filterActive ? '#fff' : COLORS.text,
-                              borderColor: !filterActive ? COLORS.primary : COLORS.border,
-                              fontWeight: !filterActive ? 700 : 500,
-                            }}
-                          >
-                            전체 ({items.length})
-                          </button>
-                          {childNames.map(name => {
-                            const isActive = filterActive && historyFilter === name;
-                            const display = name === '__none__' ? '이름 미입력' : nameWithSuffix(name);
-                            return (
-                              <button
-                                key={name}
-                                onClick={() => setHistoryFilter(isActive ? '' : name)}
-                                style={{
-                                  ...styles.filterChip,
-                                  background: isActive ? COLORS.primary : '#fff',
-                                  color: isActive ? '#fff' : COLORS.text,
-                                  borderColor: isActive ? COLORS.primary : COLORS.border,
-                                  fontWeight: isActive ? 700 : 500,
-                                }}
-                              >
-                                {display} ({groups[name].length})
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* 아동별 목록 */}
-                      {filteredKeys.map(name => (
-                        <div key={`${keyPrefix}-${name}`} style={styles.historyGroup}>
-                          <div style={styles.historyGroupHeader}>
-                            {name === '__none__' ? (
-                              <span style={styles.historyGroupNameNone}>이름 미입력</span>
-                            ) : (
-                              <span style={styles.historyGroupName}>{nameWithSuffix(name)}</span>
-                            )}
-                            <span style={styles.historyGroupCount}>{filtered[name].length}개</span>
-                          </div>
-                          <div style={styles.historyList}>
-                            {filtered[name].map((h, i) => (
-                              <div key={h.createdAt || i} style={styles.historyItemWrap}>
-                                <button onClick={() => loadFromHistory(h)} style={styles.historyItem}>
-                                  <span style={styles.historyTopic}>
-                                    {h.topic}
-                                    {h.functionInfo && (
-                                      <span style={{ ...styles.historyTag, background: `${h.functionInfo.color}25`, color: h.functionInfo.color }}>
-                                        {h.functionInfo.label}
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span style={styles.historyDate}>{new Date(h.createdAt).toLocaleDateString('ko-KR')}</span>
-                                </button>
-                                <button
-                                  onClick={() => removeHistoryItem(h)}
-                                  style={styles.historyItemRemove}
-                                  title="이 가이드 삭제"
-                                  aria-label="삭제"
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </>
-                  );
-                };
-
-                // ── 통합 조회(__ALL__): 선생님별 폴더 토글 ──
-                if (isAllView) {
-                  const byOwner = {};
-                  history.forEach(h => {
-                    const oid = h.owner_id || '__unknown__';
-                    if (!byOwner[oid]) byOwner[oid] = [];
-                    byOwner[oid].push(h);
-                  });
-                  const ownerIds = Object.keys(byOwner).sort((a, b) => {
-                    const an = ownerNameMap[a] || a;
-                    const bn = ownerNameMap[b] || b;
-                    return an.localeCompare(bn, 'ko');
-                  });
-
-                  return (
-                    <>
-                      {ownerIds.map(oid => {
-                        const ownerName = ownerNameMap[oid] || (oid === '__unknown__' ? '소유자 미상' : oid);
-                        const isCollapsed = collapsedOwners[oid];
-                        const count = byOwner[oid].length;
-                        return (
-                          <div key={oid} style={styles.ownerFolder}>
-                            <button
-                              onClick={() => setCollapsedOwners(prev => ({ ...prev, [oid]: !prev[oid] }))}
-                              style={styles.ownerFolderHeader}
-                            >
-                              <span style={styles.ownerFolderCaret}>{isCollapsed ? '▶' : '▼'}</span>
-                              <span style={styles.ownerFolderName}>{ownerName} 선생님</span>
-                              <span style={styles.ownerFolderCount}>{count}개</span>
-                            </button>
-                            {!isCollapsed && (
-                              <div style={styles.ownerFolderBody}>
-                                {renderChildGroups(byOwner[oid], oid)}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </>
-                  );
-                }
-
-                // ── 내 보관함 / 개별 선생님 조회: 기존 아동별 그룹 ──
-                return renderChildGroups(history, 'my');
-              })()}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ─────────── 사용 설명서 드로어 ─────────── */}
-      {showManual && (
-        <>
-          <div
-            className="no-print"
-            onClick={() => setShowManual(false)}
-            style={styles.drawerOverlay}
-          />
-          <div className="no-print app-drawer-panel" style={styles.drawerPanel}>
-            <div style={styles.drawerHeader}>
-              <div style={styles.drawerTitle}>사용 설명서</div>
-              <button
-                onClick={() => setShowManual(false)}
-                style={styles.drawerCloseBtn}
-                aria-label="설명서 닫기"
-              >
-                ×
-              </button>
-            </div>
-            <div style={styles.drawerBody}>
-              <div style={styles.manualContent}>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>이 앱은 무엇인가요</div>
-                  <p style={styles.manualParagraph}>
-                    검단ABA언어행동연구소가 만든 가정 연계 도구입니다. 센터에서 ABA 수업을 마친 뒤, 어머님께 그 주에 집에서 같이 해볼 5분 연습 가이드를 카카오톡이나 PDF로 보내드리기 위한 용도로 설계되었습니다.
-                  </p>
-                  <p style={styles.manualParagraph}>
-                    주제와 예상 행동 기능을 고르면, 임상 메모 톤의 가이드 초안이 자동으로 채워집니다. 미사여구나 응원 멘트 없이, 어머님이 그날 저녁 5분 동안 따라할 수 있는 실천법 중심으로 구성되어 있습니다. 초안을 그대로 보내셔도 되고, '수정' 버튼으로 아이 상황에 맞게 어휘와 내용을 손보신 뒤 보내셔도 됩니다.
-                  </p>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>가이드 한 장 만드는 순서</div>
-
-                  <div style={styles.manualStep}>
-                    <div style={styles.manualStepNum}>1</div>
-                    <div style={styles.manualStepBody}>
-                      <div style={styles.manualStepTitle}>아동 이름 입력 (선택)</div>
-                      <div style={styles.manualStepText}>
-                        성은 빼고 이름만 입력해 주세요("민다솔" 대신 "다솔"). 비워두시면 가이드 전체에서 "아이"로 표기됩니다. 받침이 있으면 자동으로 "이"가 붙고("민준" → "민준이"), 받침이 없으면 그대로 나옵니다("다혜" → "다혜").
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={styles.manualStep}>
-                    <div style={styles.manualStepNum}>2</div>
-                    <div style={styles.manualStepBody}>
-                      <div style={styles.manualStepTitle}>오늘의 주제 입력</div>
-                      <div style={styles.manualStepText}>
-                        그 주에 집중하실 한 가지 주제만 적습니다. 예: "소리지름 대신 카드 사용", "밥상에서 자리 유지", "옷 갈아입기 도움 줄이기".
-                      </div>
-                      <div style={styles.manualTip}>
-                        자주 쓰시는 주제는 즐겨찾기 칩으로 등록해두시면 다음에 한 번에 선택할 수 있습니다.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={styles.manualStep}>
-                    <div style={styles.manualStepNum}>3</div>
-                    <div style={styles.manualStepBody}>
-                      <div style={styles.manualStepTitle}>예상 행동 기능 선택</div>
-                      <div style={styles.manualStepText}>
-                        다섯 가지 중 한 가지를 고릅니다. 단정이 아니라 "이번 주에는 이쪽으로 살펴보겠습니다" 정도의 가설입니다.
-                      </div>
-                      <ul style={styles.manualList}>
-                        <li><strong>관심끌기</strong> — 어른의 반응을 끌어내려는 행동</li>
-                        <li><strong>회피</strong> — 과제·상황에서 벗어나려는 행동</li>
-                        <li><strong>요구</strong> — 물건·활동을 얻으려는 행동</li>
-                        <li><strong>자기자극</strong> — 감각 자극을 위한 행동</li>
-                        <li><strong>기타 / 복합</strong> — 분명하지 않거나 여러 기능이 섞인 경우. 선택하시면 상황을 직접 적는 칸이 나옵니다.</li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  <div style={styles.manualStep}>
-                    <div style={styles.manualStepNum}>4</div>
-                    <div style={styles.manualStepBody}>
-                      <div style={styles.manualStepTitle}>가이드 생성</div>
-                      <div style={styles.manualStepText}>
-                        '가이드 생성' 버튼을 누르면 20~30초 안에 결과가 나옵니다. 생성된 가이드는 자동으로 보관함에 저장됩니다.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>가이드 구성</div>
-                  <p style={styles.manualParagraph}>
-                    자동으로 채워지는 가이드는 항상 같은 구조를 따릅니다. 모든 항목은 '수정' 버튼으로 고칠 수 있습니다.
-                  </p>
-                  <ul style={styles.manualList}>
-                    <li><strong>도입부</strong> — 어머님께 보내는 짧은 인사와 이번 주 방향</li>
-                    <li><strong>예상 기능 살펴보기</strong> — 선택하신 기능을 어떻게 해석하는지 1~2문장</li>
-                    <li><strong>이번 주 목표</strong> — 측정 가능한 형태 (예: "하루 5분 연습에서 카드 사용 3회 이상")</li>
-                    <li><strong>준비물</strong> — 집에서 바로 준비할 수 있는 것</li>
-                    <li><strong>5분 실천법</strong> — 1단계(2분) / 2단계(2분) / 3단계(1분) 구성</li>
-                    <li><strong>기다림의 포인트</strong> — 어머님이 개입을 줄이고 기다려야 할 순간</li>
-                    <li><strong>강화(칭찬) 타이밍</strong> — 언제, 어떻게 칭찬할지</li>
-                    <li><strong>이번 주 집중 관찰</strong> — 한 문장</li>
-                    <li><strong>다음 주 우선순위</strong> — 이번 주 결과에 따라 어디로 갈지</li>
-                    <li><strong>주간 체크표</strong> — 어머님이 매일 시도/성공 횟수를 적으실 7칸</li>
-                  </ul>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>결과 가이드로 할 수 있는 일</div>
-
-                  <div style={styles.manualFeature}>
-                    <div style={styles.manualFeatureTitle}>✎ 수정</div>
-                    <div style={styles.manualStepText}>
-                      모든 칸을 직접 손볼 수 있습니다. 아동 이름, 도입부 문장, 단계별 실천법까지 textarea가 자동으로 높이를 늘려가며 편집됩니다. 저장하시면 보관함의 해당 가이드도 함께 갱신되고 "수정됨" 배지가 붙습니다.
-                    </div>
-                  </div>
-
-                  <div style={styles.manualFeature}>
-                    <div style={styles.manualFeatureTitle}>어머님께 전송용 텍스트 복사</div>
-                    <div style={styles.manualStepText}>
-                      카카오톡에 그대로 붙여넣을 수 있는 평문 텍스트가 클립보드에 복사됩니다. 표 대신 줄 단위로 정리되어 있고, 주간 체크표는 빈 양식으로 들어갑니다.
-                    </div>
-                  </div>
-
-                  <div style={styles.manualFeature}>
-                    <div style={styles.manualFeatureTitle}>PDF / 인쇄</div>
-                    <div style={styles.manualStepText}>
-                      새 창이 열리면서 시스템 인쇄 대화상자가 나타납니다. "PDF로 저장"을 선택하시면 A4 1~2장 분량의 PDF 파일이 만들어집니다. 색상이 잘 안 나오면 인쇄 옵션에서 '배경 그래픽' 또는 '컬러' 설정을 확인해주세요.
-                    </div>
-                  </div>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>보관함</div>
-                  <p style={styles.manualParagraph}>
-                    생성하신 가이드는 자동으로 보관함에 저장됩니다. 헤더의 '보관함' 버튼을 누르시면 우측에서 패널이 열립니다.
-                  </p>
-                  <ul style={styles.manualList}>
-                    <li>아동 이름별로 자동 그룹화됩니다.</li>
-                    <li>아동 이름 칩을 누르시면 해당 아동 가이드만 필터링됩니다.</li>
-                    <li>가이드 항목을 누르시면 그대로 불러옵니다 (현재 작업 중인 내용은 사라지니 주의).</li>
-                    <li>최대 30개까지 보관되며, 그 이상은 가장 오래된 것부터 자동 삭제됩니다.</li>
-                    <li>개별 삭제와 전체 삭제 모두 확인 모달이 한 번 더 뜹니다.</li>
-                  </ul>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>주간 체크표 사용법</div>
-                  <p style={styles.manualParagraph}>
-                    어머님께서 매일 저녁 그날 시도한 횟수와 성공한 횟수를 적으시도록 만들어진 표입니다. 7일치를 다 채우신 다음, 다음 센터 방문 때 보여주시면 치료사가 다음 주 방향 결정에 반영합니다.
-                  </p>
-                  <p style={styles.manualParagraph}>
-                    이전 버전에 있던 '총 시도/총 성공/성공률' 자동 계산은 제거되었습니다. 어머님이 부담을 덜 가지시고 횟수만 적으실 수 있도록 한 의도입니다.
-                  </p>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>가이드 작성 톤</div>
-                  <p style={styles.manualParagraph}>
-                    AI에게 명시적으로 금지된 표현이 있습니다.
-                  </p>
-                  <ul style={styles.manualList}>
-                    <li>"부모님" → 반드시 "어머님"</li>
-                    <li>"~하는 그 순간" 같은 감성·시적 표현 금지</li>
-                    <li>"화이팅", "잘하고 계세요" 같은 응원 멘트 금지</li>
-                    <li>"이 가이드는", "출발점", "시작점" 같은 메타 발화 금지</li>
-                    <li>"정말", "꼭", "반드시", "절대" 같은 강조 부사 거의 사용 금지</li>
-                    <li>이모티콘, 별표, 느낌표 거의 사용 금지</li>
-                    <li>없는 일을 지어내지 않음 — AI는 그날 센터에서 실제로 어떤 일이 있었는지 알지 못합니다. 도입부에는 일반적인 한 문장만 들어가고, 구체적인 장면이 필요하면 수정 모드에서 직접 적어주셔야 합니다.</li>
-                  </ul>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>주의사항</div>
-                  <ul style={styles.manualList}>
-                    <li>AI 생성 내용은 초안입니다. 발송 전 반드시 한 번 읽어보시고 필요하면 수정해주세요.</li>
-                    <li>"이번 주 목표"의 횟수, 회기 시간, 강도는 아동의 실제 수준과 다를 수 있으니 임상 판단으로 보정해주세요.</li>
-                    <li>같은 주제·기능으로 여러 번 생성해도 매번 다른 가이드가 나옵니다. 마음에 드는 안이 나올 때까지 다시 생성하셔도 됩니다.</li>
-                    <li>보관함 데이터는 기기/브라우저에 저장됩니다. 브라우저 캐시를 비우시면 사라질 수 있으니 중요한 가이드는 PDF로 따로 저장해두시는 것을 권장합니다.</li>
-                  </ul>
-                </div>
-
-                <div style={styles.manualSection}>
-                  <div style={styles.manualSectionTitle}>문의</div>
-                  <p style={styles.manualParagraph}>
-                    검단ABA언어행동연구소
-                  </p>
-                </div>
-
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {loading && (
-        <div className="no-print" style={styles.loadingBox}>
-          <div style={styles.loadingHeader}>
-            <div className="spinner" style={styles.spinnerEl}></div>
-            <div style={styles.loadingTitle}>ABA 가이드를 작성하고 있습니다</div>
-            <div style={styles.loadingSubtitle}>약 20~30초 정도 소요됩니다</div>
-          </div>
-          <div style={styles.progressWrap}>
-            <div style={styles.progressBar}>
-              <div style={{ ...styles.progressFill, width: `${currentStage.percent}%` }} />
-            </div>
-            <div style={styles.progressMeta}>
-              <span>{elapsed}초 경과</span>
-              <span style={{ color: COLORS.primary, fontWeight: 600 }}>{currentStage.percent}%</span>
-            </div>
-          </div>
-          <div key={currentStage.text} className="stage-text" style={styles.stageRow}>
-            <span className="pulse-dot" style={styles.stageDot}></span>
-            <span style={styles.stageText}>{currentStage.text}</span>
-          </div>
-          <div style={styles.stagesList}>
-            {LOADING_STAGES.slice(0, 5).map((s, i) => {
-              const nextStage = LOADING_STAGES[i + 1];
-              const done = nextStage ? elapsed >= nextStage.at : false;
-              const active = currentStage.text === s.text;
-              return (
-                <div key={i} style={styles.stageItem}>
-                  <span style={{
-                    ...styles.stageCheck,
-                    background: done ? '#8b6f47' : active ? '#c9a987' : '#e5d9c9',
-                    color: done || active ? '#fff' : '#a89c8e',
-                  }}>{done ? '✓' : i + 1}</span>
-                  <span style={{
-                    ...styles.stageItemText,
-                    color: done ? '#3d3128' : active ? '#6b5436' : '#a89c8e',
-                    fontWeight: active ? 600 : 400,
-                  }}>{s.text}</span>
-                </div>
               );
             })}
           </div>
-        </div>
-      )}
-
-      {guide && !loading && (
-        <>
-          <div className="no-print app-action-row" style={styles.actionRow}>
-            {!isEditing ? (
-              <>
-                <button onClick={() => generateGuide(topic, selectedFunction, guideSeed + 1)} style={styles.actionBtn} className="app-action-btn" disabled={loading}>🔄 다시 생성</button>
-                <button onClick={startEditing} style={styles.editBtn} className="app-action-btn">✎ 수정</button>
-                <button onClick={copyToClipboard} style={styles.actionBtn} className="app-action-btn">어머님께 전송용 텍스트 복사</button>
-                <button onClick={handlePrint} style={styles.actionBtn} className="app-action-btn">PDF / 인쇄</button>
-                {guide.editedAt && (
-                  <span style={styles.editedBadge}>
-                    {new Date(guide.editedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 수정됨
-                  </span>
-                )}
-                {copyStatus && <span style={styles.copyStatus}>{copyStatus}</span>}
-              </>
-            ) : (
-              <>
-                <button onClick={saveEditing} style={styles.saveBtn} className="app-action-btn">저장</button>
-                <button onClick={cancelEditing} style={styles.cancelBtn} className="app-action-btn">취소</button>
-                <span style={styles.editingHint}>편집 모드 — 모든 칸을 직접 수정할 수 있습니다</span>
-              </>
-            )}
+          <div style={{ fontSize: 12, color: TH.dark, background: TH.soft, borderRadius: 8, padding: "7px 10px", marginBottom: 12 }}>
+            {BRANCHES.find((b) => b.id === branch)?.desc}
           </div>
 
-          <div id="printable-guide" style={styles.guideCard} className="guide-card app-guide-card">
-            <div style={styles.guideHeader} className="app-guide-header">
-              <img src={LOGO_DATA_URI} alt="검단ABA 로고" style={styles.guideLogo} className="app-guide-logo" />
-              <div style={styles.guideTitle} className="app-guide-title">
-                {(isEditing ? editDraft.childName : guide.childName)
-                  ? `${namePlusReul(isEditing ? editDraft.childName : guide.childName)} 위한 `
-                  : ''}집에서 하는 5분 ABA 가이드
-              </div>
+          {/* ① 아이 */}
+          <FormBox n="1" title="아이" color={TH}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 6 }}>
+              <input
+                style={{ ...styles.addInput, minWidth: 0 }}
+                value={childName}
+                placeholder="이름 (예: 민다솔)"
+                onChange={(e) => setChildName(e.target.value)}
+              />
+              <input
+                style={{ ...styles.addInput, minWidth: 0 }}
+                type="date"
+                value={birthDate}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setBirthDate(e.target.value)}
+                aria-label="생년월일(선택)"
+              />
             </div>
+            <div style={{ fontSize: 11.5, color: C.sub, marginTop: 6 }}>
+              {childName.trim() ? <>자료에는 ‘<b style={{ color: TH.dark }}>{childCall(childName)}</b>’{childAge ? ` · ${Math.floor(childAge / 12)}세 ${childAge % 12}개월` : ""}로 들어갑니다.</> : "생년월일은 선택입니다. 넣으면 자료 위 표에 나이가 나옵니다."}
+            </div>
+          </FormBox>
 
-            {isEditing && (
-              <div style={styles.editNameRow}>
-                <span style={styles.editNameLabel}>아동 이름</span>
-                <input
-                  type="text"
-                  value={editDraft.childName}
-                  onChange={(e) => updateDraft('childName', e.target.value)}
-                  placeholder="비워두면 '아이'로 표기됩니다"
-                  style={styles.editNameInput}
-                />
-              </div>
-            )}
+          {/* ② 꼭 고를 것 */}
+          <FormBox n="2" title="꼭 고를 것" color={TH}>
+            {branch === "play" && (
+              <>
+                <MiniLabel req>놀이 단계 (최대 2개)</MiniLabel>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 5 }}>
+                  {LEVELS.map((L) => {
+                    const on = levels.includes(L.id);
+                    return (
+                      <button key={L.id} onClick={() => toggleLevel(L.id)} style={cardS(on)} aria-pressed={on}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: on ? TH.dark : C.ink }}>{L.name}</div>
+                        <div style={{ fontSize: 10, color: C.sub, marginTop: 1 }}>{L.age}</div>
+                      </button>
+                    );
+                  })}
+                </div>
 
-            {isEditing ? (
-              <div style={styles.intro}>
-                <AutoTextarea
-                  value={editDraft.intro}
-                  onChange={(e) => updateDraft('intro', e.target.value)}
-                  style={styles.editTextarea}
-                  minRows={3}
-                />
-              </div>
-            ) : (
-              <div style={styles.intro}>{renderMultiline(guide.intro)}</div>
-            )}
-
-            <div style={styles.topicRow}>
-              <div style={styles.todayTopic}>
-                <span style={styles.todayLabel}>오늘의 주제</span>
-                {isEditing ? (
+                <MiniLabel req>놀잇감 (고른 것만 나옵니다)</MiniLabel>
+                <div style={styles.chips}>
+                  {TOYS.map((t) => {
+                    const on = toys.includes(t.n);
+                    return (
+                      <button key={t.n} onClick={() => toggleToy(t.n)} style={chipS(on)} aria-pressed={on}>
+                        <span style={{ marginRight: 3 }}>{t.e}</span>
+                        {t.n}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={styles.addRow}>
                   <input
-                    type="text"
-                    value={editDraft.topic}
-                    onChange={(e) => updateDraft('topic', e.target.value)}
-                    style={styles.editTopicInput}
+                    style={styles.addInput}
+                    value={customToy}
+                    placeholder="목록에 없으면 직접 입력 후 Enter"
+                    onChange={(e) => setCustomToy(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addCustomToy()}
                   />
-                ) : (
-                  <span style={styles.todayValue}>{guide.topic}</span>
+                  <button style={{ ...styles.addBtn, background: TH.main }} onClick={addCustomToy}>추가</button>
+                </div>
+                {toys.filter((t) => !TOYS.some((x) => x.n === t)).length > 0 && (
+                  <div style={styles.customList}>
+                    {toys.filter((t) => !TOYS.some((x) => x.n === t)).map((t) => (
+                      <button key={t} style={{ ...chipS(true), fontSize: 12 }} onClick={() => toggleToy(t)}>{t} ✕</button>
+                    ))}
+                  </div>
                 )}
-              </div>
-            </div>
 
-            {guide.otherDetail && !isEditing && (
-              <div style={styles.otherDetailDisplay}>
-                <span style={styles.otherDetailLabel}>관찰된 상황</span>
-                <span style={styles.otherDetailText}>{guide.otherDetail}</span>
-              </div>
+                <MiniLabel>이번 주 중심 목표 (최대 2개, 비우면 단계에 맞게)</MiniLabel>
+                <div style={styles.chips}>
+                  {PLAY_GOALS.map((g) => {
+                    const on = playGoals.includes(g);
+                    return (
+                      <button key={g} onClick={() => togglePlayGoal(g)} style={chipS(on)} aria-pressed={on}>{g}</button>
+                    );
+                  })}
+                </div>
+              </>
             )}
 
-            <div style={styles.tableWrap}>
-              {[
-                { key: 'function_analysis', label: '예상 기능 살펴보기', highlight: true, rows: 4 },
-                { key: 'goal', label: '이번 주 목표', rows: 3 },
-                { key: 'materials', label: '준비물', rows: 4 },
-                { key: 'practice', label: '5분 실천법', rows: 8 },
-                { key: 'waiting', label: '기다림의 포인트', rows: 3 },
-                { key: 'reinforcement', label: '강화(칭찬) 타이밍', rows: 5 },
-                { key: 'next_priority', label: '다음 주 우선순위', rows: 3, soft: true },
-              ].map((row, i) => (
-                <div key={i} style={styles.row} className="guide-row app-guide-row">
-                  <div className="app-row-label" style={{
-                    ...styles.rowLabel,
-                    background: row.highlight ? COLORS.accentLight : row.soft ? '#f5ede0' : COLORS.rowBg,
-                  }}>
-                    {row.label}
+            {branch === "skill" && (
+              <>
+                <MiniLabel req>연습할 기술</MiniLabel>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {SKILL_GROUPS.map((g) => (
+                    <div key={g.group} style={{ display: "grid", gridTemplateColumns: "34px minmax(0,1fr)", gap: 6, alignItems: "start" }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: TH.dark, paddingTop: 7 }}>{g.group}</div>
+                      <div style={styles.chips}>
+                        {g.items.map((s) => {
+                          const on = skill === s;
+                          return <button key={s} onClick={() => setSkill(s)} style={chipS(on)} aria-pressed={on}>{s}</button>;
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ display: "grid", gridTemplateColumns: "34px minmax(0,1fr)", gap: 6, alignItems: "center" }}>
+                    <div />
+                    <button onClick={() => setSkill("__custom")} style={{ ...chipS(skill === "__custom"), borderStyle: "dashed", justifySelf: "start" }}>+ 직접 입력</button>
                   </div>
-                  <div style={styles.rowContent} className="app-row-content">
-                    {isEditing ? (
-                      <AutoTextarea
-                        value={editDraft[row.key]}
-                        onChange={(e) => updateDraft(row.key, e.target.value)}
-                        style={styles.editTextarea}
-                        minRows={row.rows}
-                      />
-                    ) : (
-                      renderMultiline(guide[row.key])
-                    )}
+                </div>
+                {skill === "__custom" && (
+                  <div style={styles.addRow}>
+                    <input style={styles.addInput} value={customSkill} placeholder="예: 젓가락질, 가방 메기" onChange={(e) => setCustomSkill(e.target.value)} />
                   </div>
+                )}
+
+                <MiniLabel req>지금 정도</MiniLabel>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 5 }}>
+                  {LEVEL3.map((L) => {
+                    const on = skillLevel === L.id;
+                    return (
+                      <button key={L.id} onClick={() => setSkillLevel(L.id)} style={cardS(on)} aria-pressed={on}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: on ? TH.dark : C.ink }}>{L.label}</div>
+                        <div style={{ fontSize: 10.5, color: C.sub, marginTop: 1 }}>{LEVEL3_HINT.skill[L.id]}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {branch === "behavior" && (
+              <>
+                <MiniLabel req>줄이고 싶은 행동</MiniLabel>
+                <div style={styles.chips}>
+                  {BEHAVIORS.map((b) => {
+                    const on = beh === b.id;
+                    return (
+                      <button key={b.id} onClick={() => pickBehavior(b.id)} style={chipS(on)} aria-pressed={on}>
+                        {b.danger && <span style={{ color: "#C0392B", marginRight: 3 }}>●</span>}
+                        {b.label}
+                      </button>
+                    );
+                  })}
+                  <button onClick={() => pickBehavior("__custom")} style={{ ...chipS(beh === "__custom"), borderStyle: "dashed" }}>+ 직접 입력</button>
+                </div>
+                <div style={{ fontSize: 11, color: C.sub, marginTop: 5 }}><span style={{ color: "#C0392B" }}>●</span> 다칠 수 있는 행동 — 자료 맨 위에 안전 안내가 붙습니다</div>
+                {beh === "__custom" && (
+                  <>
+                    <div style={styles.addRow}>
+                      <input style={styles.addInput} value={customBeh} placeholder="예: 옷 벗기, 침 뱉기" onChange={(e) => setCustomBeh(e.target.value)} />
+                    </div>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, marginTop: 8, color: C.ink }}>
+                      <input type="checkbox" checked={customDanger} onChange={(e) => setCustomDanger(e.target.checked)} />
+                      다칠 수 있는 행동이에요 (안전 안내를 넣습니다)
+                    </label>
+                  </>
+                )}
+
+                <MiniLabel>언제·어떤 모습인지 짧게</MiniLabel>
+                <input
+                  style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }}
+                  value={situation}
+                  placeholder="예: 정리 시간에 장난감 바퀴만 계속 돌림"
+                  onChange={(e) => setSituation(e.target.value)}
+                />
+
+                <MiniLabel req>이 행동의 이유 (예상)</MiniLabel>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 5 }}>
+                  {FNS.map((f) => {
+                    const on = fn === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => setFn(f.id)}
+                        aria-pressed={on}
+                        style={{ ...cardS(on), textAlign: "left", padding: "7px 9px", ...(f.id === "unknown" ? { gridColumn: "span 2" } : {}) }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 800, color: on ? TH.dark : C.ink }}>{f.label}</span>
+                        <span style={{ fontSize: 11, color: C.sub, marginLeft: 6 }}>{f.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <MiniLabel req>지금 정도</MiniLabel>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 5 }}>
+                  {LEVEL3.map((L) => {
+                    const on = behLevel === L.id;
+                    return (
+                      <button key={L.id} onClick={() => setBehLevel(L.id)} style={cardS(on)} aria-pressed={on}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: on ? TH.dark : C.ink }}>{L.label}</div>
+                        <div style={{ fontSize: 10.5, color: C.sub, marginTop: 1 }}>{LEVEL3_HINT.behavior[L.id]}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </FormBox>
+
+          {/* ③ 더 적으면 좋은 것 (선택) */}
+          <FormBox n="3" title="더 적으면 좋아요" sub="선택" color={TH} soft>
+            {branch === "behavior" && (
+              <>
+                <MiniLabel>행동 뒤에 보통 어떻게 되나요?</MiniLabel>
+                <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={afterText} placeholder="예: 엄마가 대신 정리해 줌" onChange={(e) => setAfterText(e.target.value)} />
+                <MiniLabel>아이가 지금 쓰는 표현 방법</MiniLabel>
+                <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={comm} placeholder="예: 한두 단어 말, 손 끌기" onChange={(e) => setComm(e.target.value)} />
+                <MiniLabel>대신할 행동</MiniLabel>
+                <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={altText} placeholder="비우면 아이에게 맞게 정해서 씁니다" onChange={(e) => setAltText(e.target.value)} />
+              </>
+            )}
+            <MiniLabel>센터에서 본 모습</MiniLabel>
+            <textarea
+              style={{ ...styles.addInput, width: "100%", boxSizing: "border-box", minHeight: 64, resize: "vertical", fontFamily: "inherit", lineHeight: 1.5, padding: "8px 10px" }}
+              value={centerNote}
+              placeholder={"예: 변기에 옷 입은 채 앉기 10번 중 7번 거부 없이 함."}
+              onChange={(e) => setCenterNote(e.target.value)}
+            />
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>적을수록 이 아이 이야기가 됩니다. 적은 사실과 숫자만 씁니다.</div>
+            <MiniLabel>좋아하는 것</MiniLabel>
+            <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={likes} placeholder="예: 뽀로로 스티커, 젤리" onChange={(e) => setLikes(e.target.value)} />
+          </FormBox>
+
+          {/* 만들기 버튼: 아래에 붙어 있어 스크롤해도 보임 */}
+          <div style={{ position: "sticky", bottom: 0, background: `linear-gradient(to top, ${C.panel} 75%, rgba(255,255,255,0))`, paddingTop: 10, marginTop: 4, zIndex: 2 }}>
+            <button
+              style={{ ...styles.generate, marginTop: 0, background: loading ? "#C9BCAD" : TH.main, boxShadow: loading ? "none" : `0 6px 18px ${TH.shadow}` }}
+              onClick={generateHome}
+              disabled={loading}
+            >
+              {loading ? "만드는 중…" : result && result.branch === branch ? `${BRANCH_LABEL[branch]} 다시 만들기 →` : `${BRANCH_LABEL[branch]} 만들기 →`}
+            </button>
+            {error && <div style={styles.errBox}>{error}</div>}
+          </div>
+        </aside>
+
+        {/* 우측 출력 */}
+        <main style={styles.right}>
+          <div style={styles.outHead}>
+            <div style={{ ...styles.outTag, background: result ? RT.main : styles.outTag.background }}>{result ? `${RT.icon} ${BRANCH_LABEL[result.branch]}` : "가정 자료"}</div>
+            <div style={styles.outTitle}>
+              {result ? result.data?.title : "만든 자료"}
+              {result && result.input?.call && result.input.call !== "아이" && (
+                <span style={styles.childMeta}> · {result.input.call}</span>
+              )}
+            </div>
+            <div style={{ ...styles.outActions, flexWrap: "wrap" }}>
+              {result && (
+                <button style={{ ...styles.actBtn, whiteSpace: "nowrap" }} onClick={() => { setResult(null); setAiNote(""); }}>
+                  📂 목록
+                </button>
+              )}
+              {result && (
+                <button
+                  style={{ ...styles.actBtn, whiteSpace: "nowrap", ...(editing ? { background: "#E0A13A", color: "#fff", border: "none" } : {}) }}
+                  onClick={() => { if (editing && document.activeElement && document.activeElement.blur) document.activeElement.blur(); setEditing((v) => !v); }}
+                >
+                  {editing ? "✓ 고치기 끝" : "✏️ 고치기"}
+                </button>
+              )}
+              <button style={{ ...styles.actBtn, whiteSpace: "nowrap" }} onClick={savePlan} disabled={!result}>
+                💾 저장
+              </button>
+              <button style={{ ...styles.actBtn, whiteSpace: "nowrap" }} onClick={copyDoc} disabled={!result}>
+                📋 카톡용 복사
+              </button>
+              <button style={{ ...styles.actBtn, ...styles.actBtnDark, background: result ? RT.main : styles.actBtnDark.background, whiteSpace: "nowrap" }} onClick={printPDF} disabled={!result}>
+                🖨 인쇄·PDF
+              </button>
+            </div>
+          </div>
+
+          {result && (
+            <div style={{ padding: "10px 20px 0" }}>
+              <div style={{ display: "inline-flex", background: "#F3EEEF", borderRadius: 10, padding: 3, gap: 3 }} role="tablist">
+                {[["mom", "엄마용"], ["teacher", "선생님용"]].map(([id, lb]) => {
+                  const on = view === id;
+                  const col = id === "mom" ? RT.main : "#4A4A5A";
+                  return (
+                    <button
+                      key={id}
+                      role="tab"
+                      aria-selected={on}
+                      onClick={() => setView(id)}
+                      style={{ border: 0, borderRadius: 8, padding: "7px 16px", fontSize: 13, fontWeight: on ? 800 : 500, cursor: "pointer", background: on ? col : "transparent", color: on ? "#fff" : C.sub }}
+                    >
+                      {lb}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, marginTop: 6, padding: "6px 10px", borderRadius: 8, background: view === "mom" ? RT.soft : "#ECECF2", color: view === "mom" ? RT.dark : "#3E3E50" }}>
+                {view === "mom" ? "어머님께 나가는 내용만 보입니다. 복사·인쇄도 이 화면 그대로 나갑니다." : "선생님용 보기입니다. 설명이 섞여 있으니 어머님께 보낼 때는 꼭 엄마용으로 바꿔 주세요."}
+              </div>
+              {editing && (
+                <div style={{ fontSize: 12, marginTop: 6, padding: "6px 10px", borderRadius: 8, background: "#FFF3D6", color: "#7A5200" }}>
+                  점선으로 표시된 글을 눌러 바로 고치세요. 다 고치면 '고치기 끝'을 눌러 주세요. 안전 안내처럼 원장님이 정해 둔 고정 문구는 고칠 수 없습니다.
+                </div>
+              )}
+              {!editing && result.edited && (
+                <div style={{ fontSize: 12, marginTop: 6, color: C.sub }}>고친 내용이 반영되어 있습니다. 복사·인쇄·저장에 고친 글이 그대로 들어갑니다.</div>
+              )}
+            </div>
+          )}
+
+          {copied && <div style={styles.toast}>클립보드에 복사됐습니다 ✓</div>}
+          {saved && <div style={styles.toast}>저장됐습니다 ✓</div>}
+
+          {/* 저장 목록 (결과 없을 때만 노출) */}
+          {!result && !loading && myPlans.length > 0 && (
+            <div style={styles.savedWrap}>
+              <div style={styles.savedHead}>
+                {me.role === "admin" ? `전체 저장 목록 (${myPlans.length})` : "내가 저장한 자료"}
+              </div>
+              {myPlans.map((p) => (
+                <div key={p.id} style={styles.savedRow}>
+                  <button style={{ ...styles.savedOpen, borderLeft: `4px solid ${(BRANCH_THEME[p.plan?.branch] || BRANCH_THEME.play).main}` }} onClick={() => openSavedPlan(p)}>
+                    <span style={styles.savedTitle}>
+                      {p.title}
+                      {p.plan?._child?.name && <span style={styles.savedAuthor}>· {p.plan._child.name}</span>}
+                    </span>
+                    <span style={styles.savedDate}>{new Date(p.created_at).toLocaleDateString("ko-KR")}</span>
+                  </button>
+                  <button style={styles.savedDel} onClick={() => deletePlan(p.id)} title="삭제">
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
+          )}
 
-            {/* 주간 체크표 */}
-            <div style={styles.checkSection} className="check-table-print app-check-section">
-              <div style={styles.checkHeader}>
-                <div>
-                  <div style={styles.checkTitle}>이번 주 체크표</div>
-                  {isEditing ? (
-                    <AutoTextarea
-                      value={editDraft.weekly_focus}
-                      onChange={(e) => updateDraft('weekly_focus', e.target.value)}
-                      style={{ ...styles.editTextarea, fontSize: '13px', minHeight: '40px' }}
-                      minRows={2}
-                    />
-                  ) : (
-                    <div style={styles.checkSubtitle}>{guide.weekly_focus}</div>
-                  )}
-                </div>
-              </div>
+          {!result && !loading && (
+            <div style={styles.empty}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🏠</div>
+              왼쪽에서 보낼 자료를 고르고
+              <br />
+              필요한 것만 채운 뒤 만들기를 눌러 주세요.
+            </div>
+          )}
 
-              <div style={styles.checkTableWrap} className="app-check-table-wrap">
-                <table style={styles.checkTable} className="app-check-table">
-                  <thead>
-                    <tr>
-                      <th style={styles.checkTh}>구분</th>
-                      {WEEK_DAYS.map(d => (
-                        <th key={d} style={styles.checkTh}>{d}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={styles.checkRowLabel}>시도 횟수</td>
-                      {checkTable.map((c, i) => (
-                        <td key={i} style={styles.checkTd}>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={c.attempts}
-                            onChange={(e) => updateCheck(i, 'attempts', e.target.value.replace(/[^0-9]/g, ''))}
-                            style={styles.checkInput}
-                            className="check-input"
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                    <tr>
-                      <td style={styles.checkRowLabel}>성공 횟수</td>
-                      {checkTable.map((c, i) => (
-                        <td key={i} style={styles.checkTd}>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={c.success}
-                            onChange={(e) => updateCheck(i, 'success', e.target.value.replace(/[^0-9]/g, ''))}
-                            style={styles.checkInput}
-                            className="check-input"
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={styles.checkNote}>
-                ※ 매일 저녁, 그날의 시도와 성공 횟수를 기록해 주세요. 다음 센터 방문 시 치료사가 확인하여 다음 단계 결정에 반영합니다.
+          {loading && (
+            <div style={styles.empty}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>✏️</div>
+              자료를 만드는 중입니다…
+              <div style={{ fontSize: 13, color: C.sub, marginTop: 8, lineHeight: 1.5 }}>
+                AI가 쓰고, 앱이 한 번 더 확인합니다. 20~40초쯤 걸려요.
               </div>
             </div>
+          )}
 
-            <div style={styles.guideFooter}>
-              <span>{new Date(guide.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-              <span>검단ABA언어행동연구소</span>
+          {result && (
+            <div ref={outRef} style={styles.outBody}>
+              {aiNote && <div className="pdf-ainote" style={styles.aiNote}>{aiNote}</div>}
+              {result.source === "old" && (
+                <div className="pdf-ainote" style={styles.aiNote}>예전에 저장한 함께놀이 계획을 새 모양으로 보여 드리고 있어요.</div>
+              )}
+              <HomeSheet r={result} view={view} edit={editing} onEdit={editResult} />
             </div>
-          </div>
-        </>
-      )}
-
-      {!guide && !loading && (
-        <div className="no-print" style={styles.emptyState}>
-          아동 이름, 주제, 행동의 기능을 입력하면 개별화된 ABA 가이드가 생성됩니다.
-        </div>
-      )}
-
-      {confirmAction && (
-        <>
-          <div
-            className="no-print"
-            style={styles.confirmOverlay}
-            onClick={() => setConfirmAction(null)}
-          />
-          <div className="no-print app-confirm-modal" style={styles.confirmModal} role="dialog" aria-modal="true">
-            <div style={styles.confirmIcon}>!</div>
-            <div style={styles.confirmMessage}>
-              {confirmAction.message.split('\n').map((line, i) => (
-                <React.Fragment key={i}>
-                  {line}
-                  {i < confirmAction.message.split('\n').length - 1 && <br />}
-                </React.Fragment>
-              ))}
-            </div>
-            <div style={styles.confirmActions}>
-              <button onClick={() => setConfirmAction(null)} style={styles.confirmCancelBtn}>
-                취소
-              </button>
-              <button onClick={confirmAction.onConfirm} style={styles.confirmDeleteBtn}>
-                삭제
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+          )}
+        </main>
+      </div>
     </div>
   );
 }
 
-const COLORS = {
-  bg: '#fdf5f5',
-  cardBg: '#ffffff',
-  primary: '#e07187',
-  primaryDark: '#a84960',
-  accent: '#f0a4b5',
-  accentLight: '#fce4ea',
-  text: '#3d2530',
-  textLight: '#8a6571',
-  border: '#f4d4dc',
-  borderLight: '#fae8ee',
-  rowBg: '#fef7f9',
-  error: '#a83e5a',
-  errorBg: '#fbe8ec',
+
+// 갈래별 색 (입력 화면·버튼·목록 표시에 씀. 엄마께 나가는 자료 틀은 BIP와 같은 분홍 유지)
+const BRANCH_THEME = {
+  play: { main: "#D9677F", dark: "#A3405A", soft: "#FDEEF1", shadow: "rgba(217,103,127,.28)", icon: "🎈" },
+  skill: { main: "#3E8A5E", dark: "#2B6646", soft: "#E8F4EC", shadow: "rgba(62,138,94,.28)", icon: "🪥" },
+  behavior: { main: "#C9781B", dark: "#8A5300", soft: "#FCF0DF", shadow: "rgba(201,120,27,.28)", icon: "🧭" },
+};
+function FormBox({ n, title, sub, color, soft, children }) {
+  return (
+    <div style={{ border: `1px solid ${soft ? C.line : color.main}`, borderLeft: `4px solid ${soft ? C.line : color.main}`, borderRadius: 12, padding: "10px 12px 12px", marginBottom: 12, background: soft ? "#FCFAFA" : "#fff" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
+        <span style={{ width: 20, height: 20, borderRadius: 6, background: soft ? "#BDB0B4" : color.main, color: "#fff", fontSize: 11.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{n}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 800, color: soft ? C.sub : color.dark }}>{title}</span>
+        {sub && <span style={{ fontSize: 11, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 10, padding: "0 7px" }}>{sub}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+function MiniLabel({ children, req }) {
+  return (
+    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, margin: "10px 0 6px" }}>
+      {children}
+      {req && <span style={{ color: "#C0392B", marginLeft: 3 }}>*</span>}
+    </div>
+  );
+}
+
+// =====================================================================
+// 가정 자료 한 장 (엄마용 / 선생님용) — BIP와 같은 보고서 틀
+// 머리(로고·제목) → 정보 표(대상·자료·담당·제공일) → 번호 붙은 칸 → 저작권
+// =====================================================================
+const WEEK = ["월", "화", "수", "목", "금", "토", "일"];
+const PINK = "#D9677F";
+const PINK_SOFT = "#FDEEF1";
+const PINK_LINE = "#F3D6DC";
+const hs = {
+  top: { display: "flex", gap: 12, alignItems: "center", marginBottom: 12 },
+  logo: { width: 46, height: "auto", flex: "none" },
+  kicker: { fontSize: 12, color: PINK, fontWeight: 600 },
+  bigTitle: { fontSize: 21, fontWeight: 800, color: C.ink, margin: "2px 0 0", lineHeight: 1.35 },
+  infoTable: { width: "100%", borderCollapse: "collapse", fontSize: 12.5, margin: "4px 0 14px", tableLayout: "fixed" },
+  th: { background: PINK_SOFT, color: "#8A3E50", fontWeight: 700, border: `1px solid ${PINK_LINE}`, padding: "6px 6px", textAlign: "center", width: "15%" },
+  td: { border: `1px solid ${PINK_LINE}`, padding: "6px 8px", color: C.ink, wordBreak: "keep-all" },
+  topic: { background: PINK_SOFT, borderRadius: 10, padding: "10px 14px", marginBottom: 16 },
+  topicT: { fontSize: 15.5, fontWeight: 800, color: "#8A3E50", marginBottom: 2 },
+  intro: { fontSize: 13.5, color: "#4A3D42", lineHeight: 1.6 },
+  sec: { marginBottom: 18 },
+  secHead: { display: "flex", alignItems: "center", gap: 8, borderLeft: `3px solid ${PINK}`, background: "#FFF7F8", padding: "6px 10px", borderRadius: "0 8px 8px 0", marginBottom: 8, breakAfter: "avoid", pageBreakAfter: "avoid" },
+  badge: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, background: PINK, color: "#fff", fontSize: 12.5, fontWeight: 800, flex: "none" },
+  secT: { fontSize: 15, fontWeight: 800, color: "#8A3E50" },
+  sub: { fontSize: 13, fontWeight: 800, color: C.ink, margin: "10px 0 5px" },
+  card: { display: "flex", gap: 8, alignItems: "flex-start", border: `1px solid ${PINK_LINE}`, borderRadius: 10, padding: "8px 12px", marginBottom: 6, fontSize: 13.5, lineHeight: 1.65, breakInside: "avoid", pageBreakInside: "avoid", background: "#fff" },
+  dot: { width: 6, height: 6, borderRadius: 3, background: PINK, marginTop: 9, flex: "none" },
+  stepNo: { flex: "none", fontSize: 12, fontWeight: 800, color: "#fff", background: PINK, borderRadius: 999, padding: "1px 8px", marginTop: 2 },
+  p: { fontSize: 13.5, lineHeight: 1.7, margin: "0 0 4px", whiteSpace: "pre-line" },
+  chip: { fontSize: 13, background: PINK_SOFT, color: "#6B2F3D", borderRadius: 14, padding: "4px 10px", lineHeight: 1.5 },
+  teacher: { fontSize: 12.5, color: "#5E5257", background: "#F4F1F2", borderRadius: 6, padding: "4px 8px", marginTop: 4, lineHeight: 1.55 },
+  safety: { border: "2px solid #C0392B", background: "#FFF5F3", borderRadius: 10, padding: "10px 14px", marginBottom: 16, breakInside: "avoid", pageBreakInside: "avoid" },
+  safetyH: { fontSize: 14, fontWeight: 800, color: "#B03A2E", marginBottom: 6 },
+  grid: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, marginTop: 4 },
+  cell: { height: 38, border: `1px solid ${PINK_LINE}`, borderRadius: 6, fontSize: 11, color: C.sub, textAlign: "center", paddingTop: 3, boxSizing: "border-box" },
+  meta: { fontSize: 12.5, color: "#5E5257", background: "#F4F1F2", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.6 },
+  why: { border: `1px dashed ${PINK}`, borderRadius: 10, padding: "10px 14px", background: "#fff" },
+  foot: { marginTop: 22, paddingTop: 10, borderTop: `1px solid ${PINK_LINE}`, fontSize: 11.5, color: C.sub, textAlign: "center", lineHeight: 1.6 },
 };
 
+function fmtDate(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d)) return "";
+  return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
+}
+
+// 고치기: 고치기 모드에서는 글자를 눌러 바로 고칠 수 있고, 고친 글이 복사·인쇄·저장에 그대로 쓰인다
+const EditCtx = React.createContext({ edit: false, onEdit: null, data: {} });
+function getAt(obj, path) {
+  return path.reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+function Ed({ p }) {
+  const { edit, onEdit, data } = React.useContext(EditCtx);
+  const v = getAt(data, p);
+  const text = v == null ? "" : String(v);
+  if (!edit) return <>{text}</>;
+  return (
+    <span
+      contentEditable
+      suppressContentEditableWarning
+      onBlur={(e) => { const t = e.currentTarget.innerText.replace(/\n+$/, ""); if (t !== text) onEdit(p, t); }}
+      style={{ outline: "1.5px dashed #E0A13A", background: "#FFF8E6", borderRadius: 4, padding: "0 2px", cursor: "text", whiteSpace: "pre-wrap" }}
+    >
+      {text}
+    </span>
+  );
+}
+const eds = (d, key) => (d[key] || []).map((_, i) => <Ed key={i} p={[key, i]} />);
+
+function Sec({ n, h, children }) {
+  return (
+    <div style={hs.sec}>
+      <div style={hs.secHead}>
+        {n != null && <span style={hs.badge}>{n}</span>}
+        <span style={hs.secT}>{h}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+function Sub({ children }) {
+  return <div style={hs.sub}>{children}</div>;
+}
+function P({ children }) {
+  return <p style={hs.p}>{children}</p>;
+}
+function Cards({ items, steps }) {
+  return (
+    <div>
+      {(items || []).filter(Boolean).map((t, i) => (
+        <div key={i} style={hs.card}>
+          {steps ? <span style={hs.stepNo}>{i + 1}단계</span> : <span style={hs.dot} />}
+          <div style={{ minWidth: 0 }}>{t}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function CheckRow({ label }) {
+  return (
+    <div style={{ marginBottom: 10, breakInside: "avoid", pageBreakInside: "avoid" }}>
+      <div style={{ fontSize: 13, color: "#4A3D42", fontWeight: 600 }}>{label}</div>
+      <div style={hs.grid}>
+        {WEEK.map((w) => (
+          <div key={w} style={hs.cell}>{w}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function CenterPart({ d }) {
+  if (!String(d.center_link || "").trim()) return null;
+  return (
+    <>
+      <Sub>센터에서 본 모습</Sub>
+      <div style={{ ...hs.card, background: PINK_SOFT }}>
+        <div style={{ minWidth: 0 }}><Ed p={["center_link"]} /></div>
+      </div>
+    </>
+  );
+}
+function SayPart({ d }) {
+  if (!(d.say || []).length) return null;
+  return (
+    <>
+      <Sub>이렇게 말해 주세요</Sub>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {d.say.map((s, i) => (
+          <span key={i} style={hs.chip}><Ed p={["say", i]} /></span>
+        ))}
+      </div>
+    </>
+  );
+}
+function WhenPart({ d }) {
+  if (!(d.when_to_do || []).length) return null;
+  return (
+    <>
+      <Sub>하루 중 언제</Sub>
+      <Cards items={eds(d, "when_to_do")} />
+    </>
+  );
+}
+function TroublePart({ d, bare }) {
+  const ts = (d.troubles || []).map((t, i) => [t, i]).filter(([t]) => t && t.do);
+  if (!ts.length) return null;
+  return (
+    <>
+      {!bare && <Sub>이럴 땐 이렇게</Sub>}
+      <Cards items={ts.map(([t, i]) => <><b>{t.when}</b><br /><Ed p={["troubles", i, "do"]} /></>)} />
+    </>
+  );
+}
+function WhyPart({ r, T, n }) {
+  const ev = evidenceFor(r);
+  if (!ev) return null;
+  return (
+    <Sec n={n} h="이 방법을 쓰는 이유">
+      <div style={hs.why}>
+        <P>{r.data?.reason ? <Ed p={["reason"]} /> : ev.mom}</P>
+        {T && (
+          <div style={hs.teacher}>
+            선생님용 근거 · {ev.teacher}
+            <br />
+            {EVIDENCE_NOTE}
+          </div>
+        )}
+      </div>
+    </Sec>
+  );
+}
+
+function HomeSheet({ r, view, edit, onEdit }) {
+  return (
+    <EditCtx.Provider value={{ edit: !!edit, onEdit, data: r.data || {} }}>
+      <HomeSheetBody r={r} view={view} />
+    </EditCtx.Provider>
+  );
+}
+function HomeSheetBody({ r, view }) {
+  const d = r.data || {};
+  const T = view === "teacher";
+  const inp = r.input || {};
+  const call = inp.call || "아이";
+  let k = 0;
+  const n = () => ++k;
+  const kind =
+    r.branch === "play" ? `놀이 루틴 · ${(inp.toys || []).join(", ")}`
+    : r.branch === "skill" ? `생활 기술 · ${inp.skill || ""}`
+    : `행동 대처 · ${inp.behavior || ""}`;
+  const who = (inp.fullName || inp.given || call) + (inp.age ? ` (${inp.age})` : "");
+  return (
+    <div>
+      <div style={hs.top}>
+        <img src={LOGO_DATA_URL} alt="검단ABA" style={hs.logo} />
+        <div style={{ minWidth: 0 }}>
+          <div style={hs.kicker}>개별화된 가정 연계 · 집에서 하는 5분</div>
+          <div style={hs.bigTitle}>가정 연계 자료 ({BRANCH_LABEL[r.branch] || "가정 자료"})</div>
+        </div>
+      </div>
+
+      <table style={hs.infoTable}>
+        <tbody>
+          <tr>
+            <th style={hs.th}>대상</th>
+            <td style={hs.td}>{who}</td>
+            <th style={hs.th}>담당</th>
+            <td style={hs.td}>{inp.teacher || ""}</td>
+          </tr>
+          <tr>
+            <th style={hs.th}>자료</th>
+            <td style={hs.td}>{kind}</td>
+            <th style={hs.th}>제공일</th>
+            <td style={hs.td}>{fmtDate(r.made)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={hs.topic}>
+        <div style={hs.topicT}><Ed p={["title"]} /></div>
+        <div style={hs.intro}>{INTRO(call)}</div>
+      </div>
+
+      {T && (
+        <div style={hs.meta}>
+          <b>선생님용 정보</b> · {BRANCH_LABEL[r.branch]}
+          {r.branch === "play" && <> · 단계 {(inp.levels || []).join("+")}</>}
+          {r.branch === "skill" && <> · {LEVEL3_LABEL[inp.level]}</>}
+          {r.branch === "behavior" && <> · 예상 이유 {FN_LABEL[inp.fn] || "-"} · {LEVEL3_LABEL[inp.level]}</>}
+          {" · "}{r.source === "ai" ? "AI로 작성" : r.source === "old" ? "예전 계획" : "미리 쓴 문구"}
+          {d.teacher_note && <div style={{ marginTop: 4 }}>{d.teacher_note}</div>}
+        </div>
+      )}
+
+      {r.branch === "play" && (
+        <>
+          <Sec n={n()} h="이번 주 목표">
+            <CenterPart d={d} />
+            {d.center_link ? <Sub>목표</Sub> : null}
+            <Cards items={(d.goals || []).map((g, i) => <><b>{g.label}</b> — <Ed p={["goals", i, "detail"]} /></>)} />
+          </Sec>
+          <Sec n={n()} h="놀이 준비">
+            <Cards items={[<><b>준비물</b> — <Ed p={["materials"]} /></>, ...eds(d, "setup")]} />
+          </Sec>
+          <Sec n={n()} h={`함께 놀기${d.title ? "" : ""}`}>
+            {(d.scenes || []).map((s, i) => (
+              <div key={i} style={hs.card}>
+                <span style={hs.stepNo}>{i + 1}</span>
+                <div style={{ minWidth: 0 }}>
+                  <b><Ed p={["scenes", i, "label"]} /></b>
+                  <div><Ed p={["scenes", i, "parent"]} /></div>
+                  {T && s.teacher && <div style={hs.teacher}>선생님용 · <Ed p={["scenes", i, "teacher"]} /></div>}
+                </div>
+              </div>
+            ))}
+            <SayPart d={d} />
+          </Sec>
+          <Sec n={n()} h="다르게 놀기">
+            <Cards items={(d.variations || []).map((v, i) => <><b><Ed p={["variations", i, "title"]} /></b> — <Ed p={["variations", i, "detail"]} /></>)} />
+            {(d.songs || []).length > 0 && (
+              <>
+                <Sub>노래로 놀기</Sub>
+                <Cards items={eds(d, "songs")} />
+              </>
+            )}
+          </Sec>
+          <Sec n={n()} h="마무리와 집에서 이어가기">
+            <Sub>마무리</Sub>
+            <Cards items={eds(d, "closing")} steps />
+            <Sub>집에서 이어가기</Sub>
+            <Cards items={eds(d, "home_tips")} />
+            <WhenPart d={d} />
+            <Sub>좋은 신호</Sub>
+            <div style={{ ...hs.card, background: PINK_SOFT }}><div style={{ minWidth: 0 }}><Ed p={["watch"]} /></div></div>
+          </Sec>
+          {(d.troubles || []).length > 0 && (
+            <Sec n={n()} h="이럴 땐 이렇게">
+              <TroublePart d={d} bare />
+            </Sec>
+          )}
+          <Sec n={n()} h="이번 주 체크">
+            <CheckRow label="함께 놀이한 날" />
+          </Sec>
+          <WhyPart r={r} T={T} n={n()} />
+        </>
+      )}
+
+      {r.branch === "skill" && (
+        <>
+          <Sec n={n()} h="이번 주 목표">
+            <CenterPart d={d} />
+            <Sub>왜 어려울까요</Sub>
+            <P><Ed p={["why"]} /></P>
+            <Sub>목표</Sub>
+            <div style={{ ...hs.card, background: PINK_SOFT }}><div style={{ minWidth: 0 }}><Ed p={["goal"]} /></div></div>
+          </Sec>
+          <Sec n={n()} h="준비물">
+            <Cards items={[<Ed key="m" p={["materials"]} />]} />
+          </Sec>
+          <Sec n={n()} h="이렇게 해 주세요">
+            <Cards items={eds(d, "steps")} steps />
+            <SayPart d={d} />
+          </Sec>
+          <Sec n={n()} h="기다리기와 칭찬">
+            <Cards items={[<><b>기다려 주세요</b><br /><Ed p={["waiting"]} /></>, <><b>칭찬은 이때</b><br /><Ed p={["praise"]} /></>]} />
+          </Sec>
+          <Sec n={n()} h="싫어할 때와 하루 중 언제">
+            <Cards items={[<><b>싫어할 때는</b><br /><Ed p={["if_refuses"]} /></>]} />
+            <TroublePart d={d} />
+            <WhenPart d={d} />
+          </Sec>
+          <Sec n={n()} h="이번 주 체크">
+            <CheckRow label={<Ed p={["check_label"]} />} />
+            <Sub>다음 주에는</Sub>
+            <P><Ed p={["next"]} /></P>
+            <P>{NEXT_NOTE}</P>
+          </Sec>
+          <WhyPart r={r} T={T} n={n()} />
+        </>
+      )}
+
+      {r.branch === "behavior" && (
+        <>
+          {inp.danger && (
+            <div style={hs.safety}>
+              <div style={hs.safetyH}>⚠ {SAFETY_TITLE}</div>
+              <Cards items={safetyLinesFor(inp)} />
+            </div>
+          )}
+          <Sec n={n()} h="행동의 이유">
+            <CenterPart d={d} />
+            <Sub>왜 그럴까요</Sub>
+            <P><Ed p={["why"]} /></P>
+          </Sec>
+          <Sec n={n()} h="미리 막기 (예방)">
+            <Cards items={eds(d, "prevent")} />
+          </Sec>
+          <Sec n={n()} h="행동이 나오면">
+            <Cards items={[<Ed key="w" p={["when_happens"]} />]} />
+          </Sec>
+          <Sec n={n()} h="대신할 행동 가르치기">
+            <div style={{ ...hs.card, background: PINK_SOFT }}><div style={{ minWidth: 0 }}><b>대신할 행동</b> — <Ed p={["alt"]} /></div></div>
+            <Cards items={eds(d, "teach")} steps />
+            <SayPart d={d} />
+            <Sub>칭찬은 이때</Sub>
+            <P><Ed p={["praise"]} /></P>
+          </Sec>
+          <Sec n={n()} h="이럴 땐 이렇게">
+            <TroublePart d={d} bare />
+            <WhenPart d={d} />
+          </Sec>
+          <Sec n={n()} h="이번 주 체크">
+            <CheckRow label={<Ed p={["check_behavior"]} />} />
+            <CheckRow label={<Ed p={["check_alt"]} />} />
+            <Sub>다음 주에는</Sub>
+            <P><Ed p={["next"]} /></P>
+            <P>{NEXT_NOTE}</P>
+          </Sec>
+          <WhyPart r={r} T={T} n={n()} />
+        </>
+      )}
+
+      <div style={hs.foot}>
+        궁금한 점은 담당 선생님께 편하게 물어봐 주세요.
+        <br />© 검단ABA언어행동연구소 (민다혜). All rights reserved.
+      </div>
+    </div>
+  );
+}
+
+function Label({ children, req }) {
+  return (
+    <div style={styles.fieldLabel}>
+      {children}
+      {req && <span style={{ color: C.brand, marginLeft: 3 }}>*</span>}
+    </div>
+  );
+}
+
+// ---------- 관리자 계정 관리 패널 ----------
+function AdminPanel({ isMobile, onClose, onLogout, me }) {
+  const [users, setUsers] = useState([]);
+  const [nEmail, setNEmail] = useState("");
+  const [nPw, setNPw] = useState("");
+  const [nName, setNName] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    try {
+      const list = await adminListUsers();
+      setUsers(list || []);
+    } catch (e) {
+      setMsg("목록을 불러오지 못했습니다.");
+    }
+  }
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function addUser() {
+    const em = nEmail.trim().toLowerCase();
+    if (!em || !nPw || !nName.trim()) {
+      setMsg("이메일·비밀번호·이름을 모두 입력해 주세요.");
+      return;
+    }
+    if (!em.includes("@")) {
+      setMsg("올바른 이메일 형식이 아닙니다.");
+      return;
+    }
+    if (nPw.length < 6) {
+      setMsg("비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+    setBusy(true);
+    setMsg("");
+    const res = await adminCreateUser(em, nPw, nName.trim());
+    if (res.error) {
+      setMsg(
+        String(res.error).toLowerCase().includes("already")
+          ? "이미 등록된 이메일입니다."
+          : res.error
+      );
+      setBusy(false);
+      return;
+    }
+    setNEmail("");
+    setNPw("");
+    setNName("");
+    setMsg("선생님 계정을 추가했습니다.");
+    setBusy(false);
+    load();
+  }
+
+  async function resetPw(u) {
+    const np = window.prompt(
+      `${u.display_name || u.email} 선생님의 새 비밀번호를 입력하세요 (6자 이상)`
+    );
+    if (!np) return;
+    if (np.trim().length < 6) {
+      setMsg("비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+    const res = await adminUpdateUserPassword(u.user_id, np.trim());
+    if (res.error) {
+      setMsg("비밀번호 변경에 실패했습니다.");
+      return;
+    }
+    setMsg(`${u.display_name || u.email} 비밀번호를 변경했습니다.`);
+  }
+
+  async function removeUser(u) {
+    if (
+      !window.confirm(
+        `${u.display_name || u.email} 계정을 삭제할까요? 저장된 놀이계획도 함께 삭제됩니다.`
+      )
+    )
+      return;
+    const res = await adminDeleteUser(u.user_id);
+    if (res.error) {
+      setMsg("삭제에 실패했습니다.");
+      return;
+    }
+    setMsg("계정을 삭제했습니다.");
+    load();
+  }
+
+  return (
+    <div style={{ ...styles.app, background: C.bg, padding: isMobile ? 10 : 20 }}>
+      <div style={styles.adminShell}>
+        <div style={styles.adminHead}>
+          <div style={styles.brandRow}>
+            <img src={LOGO_DATA_URL} alt="검단ABA" style={styles.logoBadgeSm} />
+            <div>
+              <div style={styles.brandTitle}>선생님 계정 관리</div>
+              <div style={styles.brandSub}>관리자: {me.name}</div>
+            </div>
+          </div>
+          <span style={{ display: "flex", gap: 6 }}>
+            <button style={styles.miniBtn} onClick={onClose}>
+              ← 생성기로
+            </button>
+            <button style={styles.miniBtn} onClick={onLogout}>
+              로그아웃
+            </button>
+          </span>
+        </div>
+
+        {/* 계정 추가 */}
+        <div style={styles.adminCard}>
+          <div style={styles.adminCardTitle}>새 선생님 계정 부여</div>
+          <div style={styles.adminForm}>
+            <input
+              style={styles.adminInput}
+              placeholder="이름"
+              value={nName}
+              onChange={(e) => setNName(e.target.value)}
+            />
+            <input
+              style={styles.adminInput}
+              type="email"
+              placeholder="이메일"
+              autoCapitalize="none"
+              value={nEmail}
+              onChange={(e) => setNEmail(e.target.value)}
+            />
+            <input
+              style={styles.adminInput}
+              type="password"
+              placeholder="비밀번호 (6자 이상)"
+              value={nPw}
+              onChange={(e) => setNPw(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addUser()}
+            />
+            <button style={styles.adminAdd} onClick={addUser} disabled={busy}>
+              {busy ? "추가 중…" : "계정 추가"}
+            </button>
+          </div>
+          {msg && <div style={styles.adminMsg}>{msg}</div>}
+        </div>
+
+        {/* 계정 목록 */}
+        <div style={styles.adminCard}>
+          <div style={styles.adminCardTitle}>계정 목록 ({users.length})</div>
+          {users.map((u) => (
+            <div key={u.user_id} style={styles.adminRow}>
+              <div style={{ flex: 1 }}>
+                <span style={styles.adminName}>
+                  {u.display_name || u.email.split("@")[0]}
+                </span>
+                <span style={styles.adminId}>{u.email}</span>
+                {u.role === "admin" && (
+                  <span style={styles.adminTag}>관리자</span>
+                )}
+              </div>
+              {u.role !== "admin" && (
+                <span style={{ display: "flex", gap: 6 }}>
+                  <button style={styles.miniBtn} onClick={() => resetPw(u)}>
+                    비번변경
+                  </button>
+                  <button style={styles.miniBtn} onClick={() => removeUser(u)}>
+                    삭제
+                  </button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const styles = {
-  container: {
-    minHeight: '100vh',
-    background: COLORS.bg,
-    fontFamily: '"Noto Sans KR", "Apple SD Gothic Neo", -apple-system, sans-serif',
-    color: COLORS.text,
-    padding: '24px 16px 80px',
-    maxWidth: '960px',
-    margin: '0 auto',
+  // gate
+  gate: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    fontFamily:
+      "'Apple SD Gothic Neo','Malgun Gothic',-apple-system,sans-serif",
   },
-  header: { marginBottom: '20px' },
-  headerInner: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '20px 24px',
-    background: COLORS.cardBg,
-    borderRadius: '12px',
-    border: `1px solid ${COLORS.border}`,
+  gateCard: {
+    width: 340,
+    background: C.panel,
+    borderRadius: 18,
+    padding: "36px 28px",
+    boxShadow: "0 12px 40px rgba(0,0,0,.08)",
+    textAlign: "center",
+    border: `1px solid ${C.line}`,
   },
-  headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '14px',
+  logoBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    objectFit: "contain",
+    display: "block",
+    margin: "0 auto 16px",
   },
-  headerLogo: {
-    width: '110px',
-    height: 'auto',
+  gateTitle: { fontSize: 20, fontWeight: 800, color: C.ink, margin: "0 0 6px" },
+  gateSub: { fontSize: 13, color: C.sub, margin: "0 0 20px" },
+  gateInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "12px 14px",
+    borderRadius: 10,
+    border: `1px solid ${C.line}`,
+    fontSize: 15,
+    outline: "none",
+    marginBottom: 12,
+  },
+  gateErr: { color: "#C0392B", fontSize: 12.5, marginBottom: 10 },
+  gateBtn: {
+    width: "100%",
+    padding: "12px",
+    borderRadius: 10,
+    border: "none",
+    background: C.brand,
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: 15,
+    cursor: "pointer",
+  },
+  gateFoot: { marginTop: 22, fontSize: 11.5, color: C.brandDark, fontWeight: 600, lineHeight: 1.6 },
+  gateFootSmall: { fontSize: 10.5, color: C.sub, fontWeight: 400 },
+  guideToggle: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: `1.5px solid ${C.brand}`,
+    background: "#fff",
+    color: C.brandDark,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    marginBottom: 12,
+  },
+  guideBox: {
+    textAlign: "left",
+    background: C.brandSoft,
+    borderRadius: 12,
+    padding: "14px 14px 12px",
+    margin: "0 0 16px",
+  },
+  guideStep: {
+    display: "flex",
+    gap: 10,
+    marginBottom: 12,
+    alignItems: "flex-start",
+  },
+  guideNum: {
+    width: 22,
+    height: 22,
+    flexShrink: 0,
+    borderRadius: "50%",
+    background: C.brand,
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: 800,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  guideStepTitle: {
+    fontSize: 12.5,
+    fontWeight: 800,
+    color: C.ink,
+    marginBottom: 2,
+  },
+  guideStepText: { fontSize: 11.5, lineHeight: 1.55, color: C.sub },
+  guideNote: {
+    fontSize: 11.5,
+    lineHeight: 1.5,
+    color: C.brandDark,
+    background: "#fff",
+    borderRadius: 8,
+    padding: "9px 11px",
+    marginTop: 4,
+  },
+
+  // layout
+  app: {
+    minHeight: "100vh",
+    padding: 20,
+    fontFamily:
+      "'Apple SD Gothic Neo','Malgun Gothic',-apple-system,sans-serif",
+    color: C.ink,
+  },
+  shell: {
+    maxWidth: 1180,
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateColumns: "360px 1fr",
+    gap: 20,
+    alignItems: "start",
+  },
+
+  // left
+  left: {
+    background: C.panel,
+    borderRadius: 16,
+    padding: 20,
+    border: `1px solid ${C.line}`,
+    boxShadow: "0 6px 24px rgba(0,0,0,.04)",
+  },
+  brandRow: { display: "flex", gap: 10, alignItems: "center", marginBottom: 18 },
+  logoBadgeSm: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    objectFit: "contain",
+    display: "block",
     flexShrink: 0,
   },
-  brandName: { fontSize: '18px', fontWeight: 700, color: COLORS.primaryDark },
-  brandSub: { fontSize: '13px', color: COLORS.textLight, marginTop: '4px' },
-  historyBtn: {
-    padding: '10px 16px',
-    background: COLORS.accentLight,
-    color: COLORS.primaryDark,
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
+  brandTitle: { fontSize: 15, fontWeight: 800 },
+  brandSub: { fontSize: 11, color: C.sub, marginTop: 2 },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: 800,
+    color: C.ink,
+    paddingBottom: 8,
+    borderBottom: `2px solid ${C.line}`,
+    marginBottom: 14,
   },
-  controls: {
-    background: COLORS.cardBg,
-    borderRadius: '12px',
-    border: `1px solid ${COLORS.border}`,
-    padding: '24px',
-    marginBottom: '20px',
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: C.ink,
+    margin: "16px 0 8px",
+  },
+  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+  levelCard: {
+    padding: "10px 8px",
+    borderRadius: 10,
+    border: `1.5px solid ${C.line}`,
+    background: "#fff",
+    cursor: "pointer",
+    textAlign: "center",
+  },
+  levelCardOn: {
+    border: `1.5px solid ${C.brand}`,
+    background: C.brandSoft,
+  },
+  levelName: { fontSize: 13.5, fontWeight: 700, color: C.brandDark },
+  levelAge: { fontSize: 11, color: C.sub, marginTop: 2 },
+  levelHint: {
+    marginTop: 8,
+    fontSize: 11.5,
+    color: C.sub,
+    background: C.brandSoft,
+    borderRadius: 8,
+    padding: "8px 10px",
+    lineHeight: 1.5,
+  },
+  chips: { display: "flex", flexWrap: "wrap", gap: 7 },
+  chip: {
+    padding: "7px 11px",
+    borderRadius: 20,
+    border: `1.5px solid ${C.line}`,
+    background: "#fff",
+    cursor: "pointer",
+    fontSize: 12.5,
+    color: C.ink,
+  },
+  chipOn: { border: `1.5px solid ${C.brand}`, background: C.brandSoft, color: C.brandDark, fontWeight: 700 },
+  addRow: { display: "flex", gap: 7, marginTop: 9 },
+  addInput: {
+    flex: 1,
+    padding: "9px 11px",
+    borderRadius: 9,
+    border: `1.5px solid ${C.line}`,
+    fontSize: 12.5,
+    outline: "none",
+  },
+  addBtn: {
+    padding: "0 16px",
+    borderRadius: 9,
+    border: "none",
+    background: C.blue,
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  customList: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  customChip: {
+    padding: "6px 10px",
+    borderRadius: 16,
+    border: `1.5px solid ${C.brand}`,
+    background: C.brandSoft,
+    color: C.brandDark,
+    fontSize: 12,
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+  domain: {
+    padding: "9px 10px",
+    borderRadius: 9,
+    border: `1.5px solid ${C.line}`,
+    background: "#fff",
+    cursor: "pointer",
+    fontSize: 13,
+    textAlign: "left",
+    color: C.ink,
+  },
+  domainOn: { border: `1.5px solid ${C.green}`, background: C.greenSoft, fontWeight: 700 },
+  generate: {
+    width: "100%",
+    marginTop: 22,
+    padding: "15px",
+    borderRadius: 12,
+    border: "none",
+    background: C.brand,
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: 15.5,
+    cursor: "pointer",
+    boxShadow: "0 6px 18px rgba(217,118,66,.3)",
+  },
+  generateOff: { background: "#C9BCAD", boxShadow: "none", cursor: "default" },
+  aiToggle: {
+    width: "100%",
+    marginTop: 14,
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: `1.5px dashed ${C.line}`,
+    background: "#fff",
+    color: C.sub,
+    fontWeight: 700,
+    fontSize: 13.5,
+    cursor: "pointer",
+    textAlign: "left",
+    lineHeight: 1.4,
+  },
+  aiToggleOn: {
+    border: `1.5px solid ${C.brand}`,
+    background: C.brandSoft,
+    color: C.brandDark,
+  },
+  aiSoon: { fontWeight: 600, fontSize: 12, color: C.sub },
+  aiNote: {
+    fontSize: 12.5,
+    color: C.brandDark,
+    background: C.brandSoft,
+    borderRadius: 10,
+    padding: "9px 12px",
+    marginBottom: 14,
+    lineHeight: 1.5,
+  },
+  errBox: {
+    marginTop: 12,
+    fontSize: 12.5,
+    color: "#C0392B",
+    background: "#FBEAE7",
+    borderRadius: 8,
+    padding: "9px 12px",
+  },
+
+  // right
+  right: {
+    background: C.panel,
+    borderRadius: 16,
+    border: `1px solid ${C.line}`,
+    boxShadow: "0 6px 24px rgba(0,0,0,.04)",
+    minHeight: 560,
+    overflow: "hidden",
+  },
+  outHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "16px 20px",
+    borderBottom: `1px solid ${C.line}`,
+    flexWrap: "wrap",
+  },
+  outTag: {
+    background: C.ink,
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: 11,
+    padding: "5px 11px",
+    borderRadius: 20,
+    letterSpacing: 0.5,
+  },
+  outTitle: { fontSize: 14, fontWeight: 700, color: C.ink, flex: 1, minWidth: 100 },
+  outActions: { display: "flex", gap: 8 },
+  actBtn: {
+    padding: "8px 13px",
+    borderRadius: 9,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+    color: C.ink,
+  },
+  actBtnDark: { background: C.green, color: "#fff", border: "none" },
+  toast: {
+    margin: "12px 20px 0",
+    background: C.greenSoft,
+    color: C.green,
+    fontWeight: 700,
+    fontSize: 13,
+    padding: "10px 14px",
+    borderRadius: 9,
+    textAlign: "center",
+  },
+  empty: {
+    textAlign: "center",
+    color: C.sub,
+    fontSize: 14.5,
+    padding: "120px 20px",
+    lineHeight: 1.7,
+  },
+  outBody: { padding: 20 },
+  stepCard: {
+    borderRadius: 14,
+    padding: "16px 18px",
+    marginBottom: 14,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    borderLeft: `4px solid ${C.brand}`,
+  },
+  stepOrange: {},
+  stepBlue: {},
+  stepGreen: {},
+  stepHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
   },
   stepLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    fontSize: '14px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '12px',
+    fontSize: 15,
+    fontWeight: 800,
+    color: C.ink,
+    display: "flex",
+    alignItems: "center",
   },
-  stepNum: {
-    width: '22px',
-    height: '22px',
-    borderRadius: '50%',
-    background: COLORS.primary,
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '12px',
-    fontWeight: 700,
+  stepDot: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 24,
+    height: 24,
+    borderRadius: "50%",
+    background: C.brand,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: 800,
+    marginRight: 8,
   },
-  stepHint: { fontSize: '12px', color: COLORS.textLight, fontWeight: 400 },
-  inputRow: { display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' },
-  input: {
-    flex: '1 1 280px',
-    minWidth: '200px',
-    padding: '12px 14px',
-    fontSize: '15px',
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '8px',
-    background: '#fff',
-    color: COLORS.text,
-    fontFamily: 'inherit',
+  stepDotHome: { background: "#D4728A" },
+  stepNo: {
+    fontSize: 10.5,
+    fontWeight: 800,
+    color: "#fff",
+    background: C.sub,
+    padding: "3px 9px",
+    borderRadius: 12,
+    letterSpacing: 0.5,
   },
-  primaryBtn: {
-    padding: '14px 22px',
-    background: COLORS.primary,
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '15px',
-    fontWeight: 700,
-    cursor: 'pointer',
+  kv: { fontSize: 13.5, margin: "4px 0", lineHeight: 1.6 },
+  kvLabel: { fontSize: 13.5, fontWeight: 700, margin: "10px 0 2px" },
+  tipBox: {
+    fontSize: 13,
+    color: C.brandDark,
+    background: C.brandSoft,
+    borderRadius: 10,
+    padding: "10px 12px",
+    marginTop: 10,
+    lineHeight: 1.5,
   },
-  secondaryBtn: {
-    padding: '12px 16px',
-    background: '#fff',
-    color: COLORS.primary,
-    border: `1px solid ${COLORS.accent}`,
-    borderRadius: '8px',
-    fontSize: '14px',
+  ul: { margin: "4px 0", paddingLeft: 20, fontSize: 13.5, lineHeight: 1.7 },
+  themeName: { fontSize: 14.5, fontWeight: 800, margin: "2px 0 12px" },
+  scene: { marginBottom: 12 },
+  sceneLabel: { fontSize: 13.5, fontWeight: 700, marginBottom: 3 },
+  coachLine: {
+    fontSize: 12.5,
+    color: C.brandDark,
+    background: C.brandSoft,
+    borderRadius: 8,
+    padding: "7px 10px",
+    marginTop: 6,
+    lineHeight: 1.5,
+  },
+  arrow: { fontSize: 13, color: "#4A4543", marginLeft: 6, lineHeight: 1.6, marginTop: 2 },
+  variation: { marginBottom: 12, fontSize: 13.5, lineHeight: 1.65 },
+  copyFoot: {
+    marginTop: 18,
+    fontSize: 11.5,
+    color: C.brandDark,
     fontWeight: 600,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
+    textAlign: "center",
+    paddingTop: 14,
+    borderTop: `1px solid ${C.line}`,
+    lineHeight: 1.6,
   },
-  error: {
-    padding: '10px 14px',
-    background: COLORS.errorBg,
-    color: COLORS.error,
-    borderRadius: '6px',
-    fontSize: '14px',
-    marginTop: '12px',
+  copyFootSmall: { fontSize: 10.5, color: C.sub, fontWeight: 400 },
+
+  // user bar
+  userBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: C.brandSoft,
+    borderRadius: 10,
+    padding: "8px 10px",
+    marginBottom: 14,
   },
-  favList: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' },
-  favChipWrap: {
-    display: 'inline-flex',
-    alignItems: 'stretch',
-    gap: '4px',
+  userName: { fontSize: 13, fontWeight: 700, color: C.brandDark },
+  adminTag: {
+    fontSize: 10,
+    fontWeight: 800,
+    color: "#fff",
+    background: C.brand,
+    padding: "2px 7px",
+    borderRadius: 10,
+    marginLeft: 6,
   },
-  favChipBtn: {
-    padding: '8px 14px',
-    border: '1.5px solid',
-    borderRadius: '20px',
-    fontSize: '13px',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    transition: 'all 0.15s ease',
-    lineHeight: 1.4,
+  inactiveTag: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: "#fff",
+    background: "#B0A89C",
+    padding: "2px 7px",
+    borderRadius: 10,
+    marginLeft: 6,
   },
-  favChipRemoveBtn: {
-    width: '28px',
-    height: '32px',
-    padding: 0,
-    background: 'transparent',
-    border: 'none',
-    color: COLORS.textLight,
-    cursor: 'pointer',
-    fontSize: '18px',
-    lineHeight: 1,
-    borderRadius: '4px',
+  miniBtn: {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    color: C.ink,
   },
-  fnGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '10px',
-    marginBottom: '4px',
+
+  // saved list
+  savedWrap: { padding: "16px 20px" },
+  savedHead: { fontSize: 13, fontWeight: 800, color: C.ink, marginBottom: 10 },
+  savedAuthor: { fontSize: 12, color: C.brandDark, fontWeight: 600, marginLeft: 6 },
+  savedRow: { display: "flex", gap: 8, marginBottom: 8, alignItems: "stretch" },
+  savedOpen: {
+    flex: 1,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "11px 13px",
+    borderRadius: 10,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    cursor: "pointer",
+    textAlign: "left",
   },
-  fnGuideBox: {
-    padding: '12px 16px',
-    background: '#fffaf2',
-    border: `1px dashed ${COLORS.accent}`,
-    borderRadius: '8px',
-    fontSize: '13px',
-    color: COLORS.primaryDark,
+  savedTitle: { fontSize: 13.5, fontWeight: 600, color: C.ink },
+  savedDate: { fontSize: 11.5, color: C.sub },
+  savedDel: {
+    width: 38,
+    borderRadius: 10,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    color: C.sub,
+    cursor: "pointer",
+    fontSize: 13,
+  },
+
+  // admin panel
+  adminShell: { maxWidth: 720, margin: "0 auto" },
+  adminHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: C.panel,
+    borderRadius: 16,
+    padding: 18,
+    border: `1px solid ${C.line}`,
+    marginBottom: 16,
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  adminCard: {
+    background: C.panel,
+    borderRadius: 16,
+    padding: 18,
+    border: `1px solid ${C.line}`,
+    marginBottom: 16,
+  },
+  adminCardTitle: {
+    fontSize: 14,
+    fontWeight: 800,
+    color: C.ink,
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottom: `2px solid ${C.line}`,
+  },
+  adminForm: { display: "flex", flexWrap: "wrap", gap: 8 },
+  adminInput: {
+    flex: "1 1 140px",
+    padding: "10px 12px",
+    borderRadius: 9,
+    border: `1.5px solid ${C.line}`,
+    fontSize: 13.5,
+    outline: "none",
+  },
+  adminAdd: {
+    padding: "10px 18px",
+    borderRadius: 9,
+    border: "none",
+    background: C.brand,
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: 13.5,
+    cursor: "pointer",
+  },
+  adminMsg: { marginTop: 10, fontSize: 12.5, color: C.brandDark },
+  adminRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "11px 4px",
+    borderBottom: `1px solid ${C.line}`,
+    flexWrap: "wrap",
+  },
+  adminName: { fontSize: 14, fontWeight: 700, color: C.ink },
+  adminId: { fontSize: 12.5, color: C.sub, marginLeft: 8 },
+  childRow: { display: "flex", gap: 8, marginBottom: 8, alignItems: "center" },
+  ageBadge: {
+    flexShrink: 0,
+    minWidth: 70,
+    textAlign: "center",
+    padding: "9px 12px",
+    borderRadius: 9,
+    background: C.brandSoft,
+    color: C.brandDark,
+    fontSize: 12.5,
+    fontWeight: 700,
+  },
+  childMeta: { fontSize: 12.5, fontWeight: 600, color: C.brandDark },
+  stepHome: { background: "#FFF4F6", borderLeftColor: "#D4728A" },
+  homeSummary: {
+    fontSize: 13.5,
+    lineHeight: 1.65,
+    margin: "2px 0 8px",
+    fontWeight: 600,
+    color: "#9B4257",
+  },
+  homeWatch: {
+    fontSize: 13,
+    lineHeight: 1.6,
+    marginTop: 8,
+    background: "#fff",
+    borderRadius: 8,
+    padding: "9px 11px",
+    color: "#7A4350",
+  },
+
+  // view toggle
+  modeRow: {
+    display: "flex",
+    gap: 8,
+    padding: "12px 20px 0",
+  },
+  modeBtn: {
+    flex: 1,
+    padding: "9px 12px",
+    borderRadius: 9,
+    border: `1.5px solid ${C.line}`,
+    background: "#fff",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    color: C.sub,
+  },
+  modeBtnOn: {
+    border: `1.5px solid ${C.brand}`,
+    background: C.brandSoft,
+    color: C.brandDark,
+  },
+
+  // parent homework sheet
+  sheetBody: { padding: 20 },
+  sheetHeader: {    textAlign: "center",
+    background: C.brand,
+    borderRadius: 14,
+    padding: "20px 16px",
+    marginBottom: 16,
+  },
+  sheetBadge: {
+    display: "inline-block",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#fff",
+    background: "#D4728A",
+    padding: "4px 12px",
+    borderRadius: 20,
+    marginBottom: 8,
+  },
+  sheetTitle: { fontSize: 20, fontWeight: 800, color: "#fff" },
+  sheetDate: { fontSize: 12, color: "#B07A86", marginTop: 4 },
+  sheetSec: { marginBottom: 18 },
+  sheetSecTitle: {
+    fontSize: 14.5,
+    fontWeight: 800,
+    color: C.ink,
+    marginBottom: 8,
+  },
+  sheetLead: {
+    fontSize: 14,
+    lineHeight: 1.65,
+    fontWeight: 600,
+    color: "#9B4257",
+    background: "#FFF6F8",
+    borderRadius: 10,
+    padding: "12px 14px",
+    margin: 0,
+  },
+  sheetText: { fontSize: 13.5, lineHeight: 1.6, color: C.ink, margin: 0 },
+  sheetUl: {
+    margin: "6px 0 0",
+    paddingLeft: 20,
+    fontSize: 13.5,
     lineHeight: 1.7,
-    marginBottom: '12px',
+    color: C.ink,
   },
-  fnCard: {
-    padding: '14px 16px',
-    background: '#fff',
-    border: `2px solid ${COLORS.borderLight}`,
-    borderRadius: '10px',
-    cursor: 'pointer',
-    textAlign: 'left',
-    fontFamily: 'inherit',
-    transition: 'all 0.2s ease',
+  sheetHint: { fontSize: 12.5, color: C.sub, margin: "0 0 10px" },
+  playCard: {
+    padding: "13px 14px",
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    marginBottom: 10,
+    background: "#fff",
   },
-  fnLabel: {
-    fontSize: '15px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '6px',
+  playHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 9,
+    marginBottom: 7,
   },
-  fnDesc: {
-    fontSize: '12.5px',
-    color: COLORS.text,
-    lineHeight: 1.5,
-    marginBottom: '6px',
+  playLabel: { fontSize: 13.5, fontWeight: 800, color: C.brandDark },
+  playNum: {
+    width: 24,
+    height: 24,
+    flexShrink: 0,
+    borderRadius: "50%",
+    background: C.brand,
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: 12.5,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  fnExample: {
-    fontSize: '11.5px',
-    color: COLORS.textLight,
-    lineHeight: 1.4,
-  },
-  otherBox: {
-    marginTop: '12px',
-    padding: '14px 16px',
-    background: COLORS.rowBg,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '10px',
-  },
-  otherLabel: {
-    fontSize: '13px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '8px',
-  },
-  otherHint: {
-    fontSize: '11px',
-    color: COLORS.textLight,
-    fontWeight: 400,
-    marginLeft: '4px',
-  },
-  otherTextarea: {
-    width: '100%',
-    padding: '10px 12px',
-    fontSize: '13.5px',
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '8px',
-    background: '#fff',
-    color: COLORS.text,
-    fontFamily: 'inherit',
+  playText: { fontSize: 13.5, lineHeight: 1.65, color: C.ink, marginBottom: 10 },
+  varCard: {
+    fontSize: 13,
     lineHeight: 1.6,
-    resize: 'vertical',
-    boxSizing: 'border-box',
-  },
-  domainSelect: {
-    width: '100%',
-    padding: '11px 12px',
-    fontSize: '14px',
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '8px',
-    background: '#fff',
-    color: COLORS.text,
-    fontFamily: 'inherit',
-    boxSizing: 'border-box',
-    cursor: 'pointer',
-  },
-  otherNote: {
-    fontSize: '11.5px',
-    color: COLORS.textLight,
-    marginTop: '6px',
-    lineHeight: 1.5,
-  },
-  levelRow: {
-    display: 'flex',
-    gap: '8px',
-    marginTop: '10px',
-  },
-  levelBtn: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '12px 8px',
-    background: '#fff',
-    border: `1.5px solid ${COLORS.border}`,
-    borderRadius: '12px',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    transition: 'all 0.15s',
-  },
-  levelBtnActive: {
-    background: COLORS.primaryBg,
-    border: `1.5px solid ${COLORS.primary}`,
-  },
-  levelBtnLabel: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: COLORS.text,
-  },
-  levelBtnHint: {
-    fontSize: '10.5px',
-    color: COLORS.textLight,
-    textAlign: 'center',
-    lineHeight: 1.3,
-  },
-  otherDetailDisplay: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '10px',
-    padding: '14px 18px',
-    background: '#fff',
-    border: `1px dashed ${COLORS.accent}`,
-    borderRadius: '10px',
-    marginBottom: '20px',
-  },
-  otherDetailLabel: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    padding: '4px 10px',
-    background: COLORS.accentLight,
-    borderRadius: '6px',
-    flexShrink: 0,
-  },
-  otherDetailText: {
-    fontSize: '14px',
-    color: COLORS.text,
-    lineHeight: 1.6,
-    flex: 1,
-  },
-  drawerOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(61, 49, 40, 0.45)',
-    zIndex: 998,
-    animation: 'fadeInOverlay 0.2s ease-out',
-  },
-  drawerPanel: {
-    position: 'fixed',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: '420px',
-    maxWidth: '90vw',
-    background: COLORS.cardBg,
-    boxShadow: '-8px 0 32px rgba(61, 49, 40, 0.15)',
-    zIndex: 999,
-    display: 'flex',
-    flexDirection: 'column',
-    animation: 'slideInRight 0.28s cubic-bezier(0.32, 0.72, 0.32, 1)',
-  },
-  drawerHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '20px 22px',
-    borderBottom: `1px solid ${COLORS.borderLight}`,
-    background: COLORS.rowBg,
-    flexShrink: 0,
-  },
-  drawerTitle: {
-    fontSize: '17px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-  },
-  drawerHeaderActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  drawerCloseBtn: {
-    width: '32px',
-    height: '32px',
-    background: '#fff',
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '8px',
-    color: COLORS.textLight,
-    cursor: 'pointer',
-    fontSize: '20px',
-    lineHeight: 1,
-    padding: 0,
-    fontFamily: 'inherit',
-  },
-  drawerBody: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '16px 18px',
-  },
-  filterBar: {
-    display: 'flex',
-    gap: '6px',
-    flexWrap: 'wrap',
-    marginBottom: '16px',
-    paddingBottom: '14px',
-    borderBottom: `1px solid ${COLORS.borderLight}`,
-  },
-  filterChip: {
-    padding: '6px 12px',
-    border: '1.5px solid',
-    borderRadius: '14px',
-    fontSize: '12px',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    transition: 'all 0.15s ease',
-    whiteSpace: 'nowrap',
-  },
-  historyGroup: {
-    marginBottom: '18px',
-  },
-  ownerFolder: {
-    marginBottom: '14px',
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '12px',
-    overflow: 'hidden',
-    background: '#fff',
-  },
-  ownerFolderHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    width: '100%',
-    padding: '12px 14px',
-    background: COLORS.accentLight,
-    border: 'none',
-    cursor: 'pointer',
-    textAlign: 'left',
-  },
-  ownerFolderCaret: {
-    fontSize: '11px',
-    color: COLORS.primaryDark,
-  },
-  ownerFolderName: {
-    flex: 1,
-    fontSize: '14px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-  },
-  ownerFolderCount: {
-    fontSize: '12px',
-    color: COLORS.textLight,
-    fontWeight: 600,
-  },
-  ownerFolderBody: {
-    padding: '12px 12px 4px',
-  },
-  historyGroupHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '6px 4px 8px',
-    marginBottom: '6px',
-    borderBottom: `1px dashed ${COLORS.borderLight}`,
-  },
-  historyGroupName: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    padding: '3px 10px',
-    background: COLORS.accentLight,
-    borderRadius: '12px',
-  },
-  historyGroupNameNone: {
-    fontSize: '13px',
-    fontWeight: 600,
-    color: COLORS.textLight,
-    padding: '3px 10px',
-    background: COLORS.borderLight,
-    borderRadius: '12px',
-    fontStyle: 'italic',
-  },
-  historyGroupCount: {
-    fontSize: '11px',
-    color: COLORS.textLight,
-    fontWeight: 500,
-  },
-  historyClearBtn: {
-    padding: '6px 12px',
-    background: '#fff',
-    color: COLORS.error,
-    border: `1px solid ${COLORS.errorBg}`,
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  historyEmpty: {
-    fontSize: '13px',
-    color: COLORS.textLight,
-    padding: '40px 8px',
-    textAlign: 'center',
-    lineHeight: 1.8,
-  },
-  historyList: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  historyItemWrap: {
-    display: 'flex',
-    alignItems: 'stretch',
-    gap: '6px',
-  },
-  historyItem: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: '6px',
-    padding: '12px 14px',
-    background: COLORS.rowBg,
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    textAlign: 'left',
-  },
-  historyItemRemove: {
-    width: '36px',
-    background: '#fff',
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '8px',
-    color: COLORS.textLight,
-    cursor: 'pointer',
-    fontSize: '18px',
-    lineHeight: 1,
-    padding: 0,
-    fontFamily: 'inherit',
-    flexShrink: 0,
-  },
-  historyTopic: {
-    fontSize: '14px',
-    color: COLORS.text,
-    fontWeight: 500,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    flexWrap: 'wrap',
-  },
-  historyTag: {
-    fontSize: '11px',
-    padding: '2px 8px',
-    borderRadius: '10px',
-    fontWeight: 600,
-  },
-  historyOwnerTag: {
-    fontSize: '10.5px',
-    padding: '2px 7px',
-    borderRadius: '10px',
-    fontWeight: 600,
-    background: '#ede0e4',
-    color: '#7a5560',
-    marginLeft: '4px',
-  },
-  historyDate: {
-    fontSize: '11px',
-    color: COLORS.textLight,
-    alignSelf: 'flex-end',
-  },
-
-  loadingBox: {
-    background: COLORS.cardBg,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '14px',
-    padding: '40px 32px',
-  },
-  loadingHeader: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '14px',
-    marginBottom: '28px',
-  },
-  spinnerEl: {
-    width: '36px',
-    height: '36px',
-    border: `3px solid ${COLORS.borderLight}`,
-    borderTopColor: COLORS.primary,
-    borderRadius: '50%',
-  },
-  loadingTitle: { fontSize: '17px', fontWeight: 700, color: COLORS.primaryDark },
-  loadingSubtitle: { fontSize: '13px', color: COLORS.textLight },
-  progressWrap: { marginBottom: '20px' },
-  progressBar: {
-    height: '8px',
-    background: COLORS.borderLight,
-    borderRadius: '4px',
-    overflow: 'hidden',
-    marginBottom: '8px',
-  },
-  progressFill: {
-    height: '100%',
-    background: `linear-gradient(90deg, ${COLORS.accent}, ${COLORS.primary})`,
-    borderRadius: '4px',
-    transition: 'width 0.6s ease-out',
-  },
-  progressMeta: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '12px',
-    color: COLORS.textLight,
-  },
-  stageRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '14px 16px',
-    background: COLORS.rowBg,
-    borderRadius: '8px',
-    marginBottom: '20px',
-  },
-  stageDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    background: COLORS.primary,
-    flexShrink: 0,
-  },
-  stageText: { fontSize: '14px', color: COLORS.primaryDark, fontWeight: 500 },
-  stagesList: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  stageItem: { display: 'flex', alignItems: 'center', gap: '12px' },
-  stageCheck: {
-    width: '22px',
-    height: '22px',
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '12px',
-    fontWeight: 700,
-    flexShrink: 0,
-    transition: 'all 0.3s ease',
-  },
-  stageItemText: { fontSize: '13px', transition: 'all 0.3s ease' },
-
-  actionRow: {
-    display: 'flex',
-    gap: '8px',
-    marginBottom: '16px',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  actionBtn: {
-    padding: '10px 16px',
-    background: '#fff',
-    color: COLORS.primaryDark,
-    border: `1px solid ${COLORS.accent}`,
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  editBtn: {
-    padding: '10px 18px',
-    background: COLORS.accentLight,
-    color: COLORS.primaryDark,
-    border: `1px solid ${COLORS.accent}`,
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  saveBtn: {
-    padding: '10px 22px',
-    background: COLORS.primary,
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  cancelBtn: {
-    padding: '10px 18px',
-    background: '#fff',
-    color: COLORS.text,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  editingHint: {
-    fontSize: '12.5px',
-    color: COLORS.primary,
-    fontStyle: 'italic',
-    marginLeft: '4px',
-  },
-  editedBadge: {
-    fontSize: '11.5px',
-    color: COLORS.textLight,
-    padding: '4px 8px',
-    background: COLORS.rowBg,
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '6px',
-  },
-  copyStatus: { fontSize: '13px', color: COLORS.primary, fontWeight: 600 },
-  editTextarea: {
-    width: '100%',
-    padding: '10px 12px',
-    fontSize: '14.5px',
-    border: `1px solid ${COLORS.accent}`,
-    borderRadius: '6px',
-    background: '#fffdf9',
-    color: COLORS.text,
-    fontFamily: 'inherit',
-    lineHeight: 1.75,
-    boxSizing: 'border-box',
-    display: 'block',
-  },
-  editTopicInput: {
-    flex: 1,
-    padding: '6px 10px',
-    fontSize: '15px',
-    fontWeight: 700,
-    border: `1px solid ${COLORS.primary}`,
-    borderRadius: '6px',
-    background: '#fff',
-    color: COLORS.primaryDark,
-    fontFamily: 'inherit',
-  },
-  editNameRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '12px 14px',
-    background: '#fffaf2',
-    border: `1px dashed ${COLORS.accent}`,
-    borderRadius: '8px',
-    marginBottom: '14px',
-  },
-  editNameLabel: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    padding: '4px 10px',
-    background: '#fff',
-    borderRadius: '6px',
-    flexShrink: 0,
-  },
-  editNameInput: {
-    flex: 1,
-    padding: '8px 12px',
-    fontSize: '14px',
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '6px',
-    background: '#fff',
-    color: COLORS.text,
-    fontFamily: 'inherit',
-  },
-
-  guideCard: {
-    background: COLORS.cardBg,
-    borderRadius: '14px',
-    border: `1px solid ${COLORS.border}`,
-    padding: '36px 32px',
-    boxShadow: '0 1px 3px rgba(139, 111, 71, 0.05)',
-  },
-  guideHeader: {
-    textAlign: 'center',
-    paddingBottom: '20px',
-    borderBottom: `1px solid ${COLORS.borderLight}`,
-    marginBottom: '24px',
-  },
-  guideLogo: {
-    width: '220px',
-    height: 'auto',
-    margin: '0 auto 12px',
-    display: 'block',
-  },
-  guideTitle: { fontSize: '22px', fontWeight: 700, color: COLORS.primaryDark, letterSpacing: '-0.5px' },
-  intro: {
-    background: COLORS.rowBg,
-    padding: '18px 20px',
-    borderRadius: '10px',
-    fontSize: '15px',
-    color: COLORS.text,
-    marginBottom: '20px',
-    lineHeight: 1.75,
-  },
-  topicRow: {
-    display: 'flex',
-    gap: '10px',
-    marginBottom: '20px',
-    flexWrap: 'wrap',
-  },
-  todayTopic: {
-    flex: '1 1 320px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '14px 18px',
-    background: COLORS.accentLight,
-    borderRadius: '10px',
-  },
-  todayLabel: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    padding: '4px 10px',
-    background: '#fff',
-    borderRadius: '6px',
-    flexShrink: 0,
-  },
-  todayValue: { fontSize: '16px', fontWeight: 700, color: COLORS.primaryDark },
-  fnTag: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '14px 18px',
-    borderRadius: '10px',
-    border: '2px solid',
-  },
-  fnTagLabel: {
-    fontSize: '12px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    padding: '4px 10px',
-    background: '#fff',
-    borderRadius: '6px',
-    flexShrink: 0,
-  },
-  fnTagValue: { fontSize: '15px', fontWeight: 700 },
-  tableWrap: {
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '10px',
-    overflow: 'hidden',
-    marginBottom: '28px',
-  },
-  row: {
-    display: 'flex',
-    borderBottom: `1px solid ${COLORS.borderLight}`,
-    background: '#fff',
-  },
-  rowLabel: {
-    flex: '0 0 140px',
-    padding: '18px 16px',
-    fontSize: '14px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    borderRight: `1px solid ${COLORS.borderLight}`,
-  },
-  rowContent: {
-    flex: 1,
-    padding: '18px 20px',
-    fontSize: '14.5px',
-    color: COLORS.text,
-    lineHeight: 1.75,
-  },
-
-  // 주간 체크표
-  checkSection: {
-    background: COLORS.rowBg,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '12px',
-    padding: '24px',
-    marginBottom: '20px',
-  },
-  checkHeader: { marginBottom: '16px' },
-  checkTitle: {
-    fontSize: '16px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '6px',
-  },
-  checkSubtitle: {
-    fontSize: '13px',
-    color: COLORS.textLight,
-    lineHeight: 1.5,
-  },
-  checkTableWrap: { overflowX: 'auto', marginBottom: '14px' },
-  checkTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    background: '#fff',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    minWidth: '560px',
-  },
-  checkTh: {
-    padding: '10px 6px',
-    background: COLORS.rowBg,
-    fontSize: '13px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    borderBottom: `1px solid ${COLORS.border}`,
-    textAlign: 'center',
-  },
-  checkRowLabel: {
-    padding: '12px 14px',
-    fontSize: '13px',
-    fontWeight: 600,
-    color: COLORS.primaryDark,
-    background: COLORS.rowBg,
-    borderRight: `1px solid ${COLORS.borderLight}`,
-    whiteSpace: 'nowrap',
-  },
-  checkTd: {
-    padding: '6px',
-    borderRight: `1px solid ${COLORS.borderLight}`,
-    textAlign: 'center',
-  },
-  checkInput: {
-    width: '100%',
-    minWidth: '36px',
-    padding: '8px 4px',
-    border: `1px solid ${COLORS.borderLight}`,
-    borderRadius: '6px',
-    background: '#fff',
-    fontSize: '14px',
-    textAlign: 'center',
-    color: COLORS.text,
-    fontFamily: 'inherit',
-  },
-  checkNote: {
-    fontSize: '12px',
-    color: COLORS.textLight,
-    lineHeight: 1.6,
-    padding: '10px 12px',
-    background: '#fff',
-    borderRadius: '6px',
-    border: `1px dashed ${COLORS.border}`,
-  },
-
-  guideFooter: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginTop: '24px',
-    paddingTop: '16px',
-    borderTop: `1px solid ${COLORS.borderLight}`,
-    fontSize: '12px',
-    color: COLORS.textLight,
-  },
-  emptyState: {
-    background: COLORS.cardBg,
-    border: `1px dashed ${COLORS.border}`,
-    borderRadius: '12px',
-    padding: '60px 24px',
-    textAlign: 'center',
-    color: COLORS.textLight,
-    fontSize: '14px',
-    lineHeight: 1.6,
-  },
-  confirmOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(61, 49, 40, 0.55)',
-    zIndex: 1000,
-    animation: 'fadeInOverlay 0.18s ease-out',
-  },
-  confirmModal: {
-    position: 'fixed',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: '380px',
-    maxWidth: '90vw',
-    background: COLORS.cardBg,
-    borderRadius: '14px',
-    padding: '28px 24px 20px',
-    boxShadow: '0 10px 40px rgba(61, 49, 40, 0.25)',
-    zIndex: 1001,
-    animation: 'fadeInModal 0.22s cubic-bezier(0.32, 0.72, 0.32, 1)',
-    textAlign: 'center',
-  },
-  confirmIcon: {
-    width: '44px',
-    height: '44px',
-    borderRadius: '50%',
-    background: COLORS.errorBg,
-    color: COLORS.error,
-    fontSize: '24px',
-    fontWeight: 700,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    margin: '0 auto 16px',
-  },
-  confirmMessage: {
-    fontSize: '14.5px',
-    color: COLORS.text,
-    lineHeight: 1.7,
-    marginBottom: '22px',
-    padding: '0 8px',
-  },
-  confirmActions: {
-    display: 'flex',
-    gap: '8px',
-  },
-  confirmCancelBtn: {
-    flex: 1,
-    padding: '12px',
-    background: '#fff',
-    color: COLORS.text,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  confirmDeleteBtn: {
-    flex: 1,
-    padding: '12px',
-    background: COLORS.error,
-    color: '#fff',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
-  headerActions: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  userBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '6px 12px',
-    background: COLORS.rowBg,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: '8px',
-    fontSize: '12px',
-  },
-  userBadgeName: {
-    fontWeight: 700,
-    color: COLORS.text,
-  },
-  userBadgeRole: {
-    fontSize: '11px',
-    color: COLORS.textLight,
-    padding: '2px 6px',
-    background: '#fff',
-    borderRadius: '4px',
-  },
-  viewingBanner: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '10px',
-    padding: '12px 18px',
-    margin: '0 16px',
-    background: '#fef4d6',
-    border: '1px solid #f0d68c',
-    borderRadius: '8px',
-    color: '#7a5a1e',
-    fontSize: '13px',
-    lineHeight: 1.5,
-  },
-  viewingBannerIcon: {
-    fontSize: '18px',
-    flexShrink: 0,
-  },
-  viewingBannerSub: {
-    fontSize: '12px',
-    color: '#8a7140',
-    marginTop: '4px',
-  },
-  manualContent: {
-    color: COLORS.text,
-    fontSize: '13.5px',
-    lineHeight: 1.75,
-  },
-  manualSection: {
-    marginBottom: '26px',
-    paddingBottom: '20px',
-    borderBottom: `1px dashed ${COLORS.borderLight}`,
-  },
-  manualSectionTitle: {
-    fontSize: '15px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '12px',
-    paddingLeft: '10px',
-    borderLeft: `3px solid ${COLORS.primary}`,
-  },
-  manualParagraph: {
-    margin: '0 0 10px 0',
-    color: COLORS.text,
-    lineHeight: 1.75,
-  },
-  manualList: {
-    margin: '8px 0 0 0',
-    paddingLeft: '20px',
-    color: COLORS.text,
-    lineHeight: 1.85,
-  },
-  manualStep: {
-    display: 'flex',
-    gap: '14px',
-    marginBottom: '16px',
-    padding: '12px 14px',
-    background: COLORS.rowBg,
-    borderRadius: '8px',
-    border: `1px solid ${COLORS.borderLight}`,
-  },
-  manualStepNum: {
-    flexShrink: 0,
-    width: '26px',
-    height: '26px',
-    borderRadius: '50%',
-    background: COLORS.primary,
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '13px',
-    fontWeight: 700,
-  },
-  manualStepBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  manualStepTitle: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '4px',
-  },
-  manualStepText: {
-    fontSize: '13px',
-    color: COLORS.text,
-    lineHeight: 1.7,
-  },
-  manualTip: {
-    marginTop: '8px',
-    padding: '8px 10px',
-    background: COLORS.accentLight,
-    borderRadius: '6px',
-    fontSize: '12px',
-    color: COLORS.primaryDark,
-    lineHeight: 1.6,
-  },
-  manualFeature: {
-    marginBottom: '14px',
-    padding: '12px 14px',
-    background: '#fff',
-    borderRadius: '8px',
-    border: `1px solid ${COLORS.borderLight}`,
-  },
-  manualFeatureTitle: {
-    fontSize: '13.5px',
-    fontWeight: 700,
-    color: COLORS.primaryDark,
-    marginBottom: '6px',
-  },
+    color: C.ink,
+    padding: "10px 12px",
+    background: "#FFF6F8",
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  dayRow: { display: "flex", gap: 6, flexWrap: "wrap" },
+  dayBox: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 3,
+  },
+  dayLabel: { fontSize: 11, color: C.sub },
+  checkBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    border: `1.5px solid ${C.brand}`,
+    display: "block",
+  },
+  memoBox: {
+    border: `1px solid ${C.line}`,
+    borderRadius: 12,
+    padding: "14px 14px 4px",
+    background: "#fff",
+  },
+  memoLine: {
+    height: 28,
+    borderBottom: `1px dashed ${C.line}`,
+    marginBottom: 8,
+  },
+  memoSection: {
+    borderRadius: 14,
+    padding: "16px 18px",
+    marginBottom: 14,
+    border: `1px solid ${C.line}`,
+    background: "#fff",
+    borderLeft: `4px solid ${C.brand}`,
+  },
+  memoTitle: { fontSize: 15, fontWeight: 800, color: C.ink, marginBottom: 10 },
+  memoSub: { fontSize: 12, color: C.sub, margin: "3px 0 10px" },
 };
