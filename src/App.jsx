@@ -1204,7 +1204,7 @@ const SKILL_GROUPS = [
   { group: "배변", items: ["소변 가리기", "대변 가리기", "기저귀 떼기", "화장실 뒤처리"] },
   { group: "씻기", items: ["손 씻기", "양치", "세수", "머리 감기·목욕", "코 풀기"] },
   { group: "옷", items: ["옷 입고 벗기", "신발 신기", "양말 신기", "단추·지퍼"] },
-  { group: "생활", items: ["장난감 정리", "잠자리 준비", "외출 준비", "손톱 깎기·머리 자르기 참기"] },
+  { group: "생활", items: ["장난감 정리", "잠자리 준비", "외출 준비"] },
 ];
 
 const BEHAVIORS = [
@@ -1242,7 +1242,7 @@ const LEVEL3_LABEL = { early: "초기", mid: "중간", high: "상위" };
 const SAFETY_TITLE = "다칠 수 있는 행동이 나올 때는 먼저 이렇게 해 주세요";
 const SAFETY_LINES = [
   "주변의 위험한 물건을 먼저 치워 주세요.",
-  "형제나 다른 사람은 아이와 떨어지게 해 주세요.",
+  "형제나 다른 사람은 먼저 안전한 곳으로 옮겨 주세요.",
   "머리를 박는 등 스스로 다치게 하면, 손이나 쿠션으로 부딪히는 곳을 막아 주세요.",
   "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.",
   "잠잠해지면 평소 하던 일로 돌아가 주세요.",
@@ -1682,6 +1682,7 @@ function localBehavior({ given, behaviorLabel, situation, fn, level, alt, danger
 // 카톡용 글
 // ─────────────────────────────────────────────
 function toText(r, view) {
+  if (r.data && r.data.lib === 3) return toText3(r, view);
   const d = r.data || {};
   const T = view === "teacher";
   const L = [];
@@ -1773,9 +1774,189 @@ function jarToPlay(p) {
   };
 }
 
-  return { BRANCHES, BRANCH_LABEL, PLAY_GOALS, SKILL_GROUPS, BEHAVIORS, FNS, FN_LABEL, LEVEL3, LEVEL3_HINT, LEVEL3_LABEL, SAFETY_TITLE, SAFETY_LINES, EVIDENCE, EVIDENCE_NOTE, evidenceFor, NEXT_NOTE, troubleLabels, safetyLinesFor, INTRO, JARGON, momStrings, appCheck, cleanData, localPlay, localSkill, localBehavior, toText, jarToPlay };
+// ─────────────────────────────────────────────
+// v3 (2026-11): 생활 기술·행동 대처 — 원장 승인 문장(LIB)은 앱이 그대로 넣고,
+// AI는 '→ ○○라면' 예시 줄(ex)만 쓴다. AI가 실패하면 예시 줄 없이 승인 문장만으로 만든다.
+// ─────────────────────────────────────────────
+const LIB = {"behavior": {"attention": {"why": "엄마나 주변 사람의 관심을 얻고 싶을 때 나오는 행동일 수 있습니다. 행동 뒤에 엄마가 쳐다보거나, 말을 걸거나, 달래 주면 아이는 ‘이렇게 하면 엄마가 온다’고 배우게 됩니다.", "meaning": "아이의 행동은 엄마를 힘들게 하려는 것이 아니라, ‘나 좀 봐 주세요’를 아직 알맞은 방법으로 알리지 못해 나오는 것입니다. 그래서 행동에는 반응을 줄이고, 알맞게 부르는 방법을 가르치면 행동은 함께 줄어듭니다. ‘하지 마’, ‘그만해’ 하고 혼내는 것도 아이에게는 관심이 될 수 있어서, 행동할 때는 말을 줄이고 잘 지낼 때 더 자주 알아봐 주시는 편이 좋습니다.", "prevent": ["엄마가 바쁜 일(통화, 요리, 동생 돌보기)을 시작하기 전에 먼저 다가가 짧게 놀아 주세요. 관심이 충분하면 관심을 끌려는 행동이 줄어듭니다.", "바쁜 동안에도 아이가 조용히 잘 지낼 때 틈틈이 먼저 다가가 짧게 말을 걸어 주세요. ‘잘 놀고 있네’ 한마디면 충분합니다.", "바쁜 일을 하기 전에 끝을 알려 주세요. ‘엄마 이거 끝나면 같이 놀자’처럼 언제 관심을 받을 수 있는지 알면 기다리기가 쉬워집니다.", "혼자 할 수 있는 좋아하는 놀이를 미리 준비해 두세요.", "‘봐 주세요’ 카드를 아이 손 닿는 곳에 두세요.", "현관문은 아이가 혼자 열 수 없게 잠가 두세요."], "teach_title": "‘엄마’ 부르기 (알맞게 관심 요청하기)", "teach": {"early": ["행동이 나오지 않는 편한 때에 연습합니다. 엄마가 조금 떨어져 있다가 ‘엄마’ 부르는 모습을 보여 주고, 아이가 소리·몸짓·카드로 부르면 바로 다가가 눈을 맞추고 반응해 주세요.", "처음에는 아이가 할 수 있는 가장 쉬운 방법(어깨 두드리기, ‘엄마’ 소리, 카드 건네기)으로 시작합니다.", "행동이 자주 나오는 때가 오기 전에, 엄마가 먼저 카드를 보여 주며 ‘엄마 불러 줘’ 하고 알려 주세요.", "알맞게 부르면 그 자리에서 바로, 크게 반응해 주세요. 행동보다 부르기가 훨씬 빨리 통한다는 것을 알게 하는 것이 핵심입니다."], "mid": ["행동이 나오지 않는 편한 때에 ‘엄마’ 부르기를 연습합니다. 아이가 부르면 바로 다가가 눈을 맞추고 반응해 주세요.", "바쁜 일을 하기 전에 ‘엄마 필요하면 엄마 하고 불러 줘’ 하고 미리 알려 주세요.", "알맞게 부르면 그 자리에서 바로 반응해 주세요.", "익숙해지면 ‘잠깐만, 이거 끝나고 갈게’ 하고 아주 잠깐 기다린 뒤 가는 연습을 조금씩 넣습니다. 기다린 뒤에는 꼭 약속대로 가 주세요."], "high": ["‘엄마’ 부르기와 잠깐 기다리기가 자리 잡았으면, ‘기다리는 중’ 카드를 쥐고 기다리는 연습을 하고, 집 밖이나 다른 가족에게도 같은 방법으로 부르게 해 주세요.", "기다리는 동안 할 수 있는 놀이를 함께 정해 두세요.", "아이가 스스로 기다리면 바로 ‘기다려 줘서 고마워’ 하고 충분히 관심을 주세요.", "행동 없이 잘 지내는 시간이 늘면, 그 시간을 조금씩 길게 해서 기다렸다가 다가가 주세요. 기다리는 시간을 얼마나 늘릴지는 센터와 함께 정합니다."]}, "when": {"early": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리 박기처럼 스스로를 다치게 하는 행동은 모른 척하고 두지 않으며, 손바닥이나 쿠션으로 부딪히는 곳을 막으면 됩니다. 때리려 하면 한 걸음 물러서고, 막는 동안에도 말을 걸거나 눈을 맞추지 않는 편이 좋습니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않고, 던질 만한 물건은 미리 치워 둡니다. 이런 일이 있었던 날은 센터에 알려 주세요.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "소리 지르기나 떼쓰기에는 쳐다보거나 말을 걸지 말고, 하던 일을 차분히 이어 가 주세요. 행동하는 중에 ‘엄마 불러 봐’ 하고 가르치는 것도 관심이 되므로 하지 않습니다.", "행동이 멈춘 직후에 바로 안아 주거나 놀아 주지 않습니다. 잠깐 평소처럼 지낸 뒤, 아이가 다른 놀이를 하거나 알맞게 부를 때 다가가 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "mid": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리 박기처럼 스스로를 다치게 하는 행동은 모른 척하고 두지 않으며, 손바닥이나 쿠션으로 부딪히는 곳을 막으면 됩니다. 때리려 하면 한 걸음 물러서고, 막는 동안에도 말을 걸거나 눈을 맞추지 않는 편이 좋습니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않고, 던질 만한 물건은 미리 치워 둡니다. 이런 일이 있었던 날은 센터에 알려 주세요.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "행동에는 쳐다보거나 말을 걸지 말고 하던 일을 차분히 이어 가 주세요. 행동하는 중에 가르치거나 달래지 않습니다.", "행동이 멈춘 직후에는 바로 관심을 주지 않고, 잠깐 평소처럼 지낸 뒤 아이가 알맞게 부를 때 다가가 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "high": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리 박기처럼 스스로를 다치게 하는 행동은 모른 척하고 두지 않으며, 손바닥이나 쿠션으로 부딪히는 곳을 막으면 됩니다. 때리려 하면 한 걸음 물러서고, 막는 동안에도 말을 걸거나 눈을 맞추지 않는 편이 좋습니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않고, 던질 만한 물건은 미리 치워 둡니다. 이런 일이 있었던 날은 센터에 알려 주세요.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "행동에는 반응하지 않고 하던 일을 이어 가 주세요.", "행동이 멈추자마자 부를 때는 짧게만 반응하고, 잠깐 평소처럼 지낸 뒤 다시 알맞게 부를 때 충분히 관심을 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."]}, "praise": ["알맞게 불렀을 때 → 그 자리에서 바로 눈을 맞추고 ‘응, 불렀구나!’ 하고 다가가 주세요.", "혼자 조용히 잘 놀고 있을 때 → 먼저 다가가 ‘잘 놀고 있네’ 하고 짧게 놀아 주세요. 행동이 없을 때 받는 관심이 가장 중요합니다.", "기다려 주었을 때 → ‘기다려 줘서 고마워’ 하고 약속대로 함께해 주세요."], "troubles": ["<b>처음 며칠 행동이 더 심해질 때</b> 처음 며칠은 ‘왜 안 통하지?’ 하고 더 크게 할 수 있습니다. 다칠 위험이 없다면 같은 방법을 꾸준히 지켜 주세요. 이때 다시 반응하면 더 큰 행동을 배우게 됩니다. 심하면 센터에 알려 주세요.", "<b>알맞게 부르지 않을 때</b> 행동이 없는 편한 때에 엄마가 먼저 ‘엄마’ 부르는 모습을 보여 주고, 아이가 따라 하면 바로 반응해 주세요. 행동하는 중에 시키지 않습니다.", "<b>밖이나 다른 사람 앞에서 그럴 때</b> 집에서와 같은 방법으로 하되, 길가처럼 위험한 곳이라면 안전한 곳으로 함께 먼저 이동해 주세요. 사람들 눈 때문에 바로 달래 주지 않도록 미리 마음을 정해 두시면 좋습니다.", "<b>동생이나 형제가 옆에 있을 때</b> 형제를 먼저 안전한 곳으로 옮겨 주시고, 아이에게는 말을 걸거나 쳐다보지 않습니다. 형제를 돌보는 일이 길어질 것 같으면 시작하기 전에 아이와 먼저 짧게 놀아 주세요."], "alt_check": "알맞게 부른 횟수", "cards": ["봐 주세요", "엄마", "기다리는 중"]}, "escape": {"why": "하기 싫거나 힘든 일 앞에서 그 일을 피하고 싶을 때 나오는 행동일 수 있습니다. 행동 뒤에 그 일이 없어지거나 엄마가 대신 해 주면, 아이는 ‘이렇게 하면 안 해도 된다’고 배우게 됩니다.", "meaning": "아이의 행동은 엄마를 힘들게 하려는 것이 아니라, ‘힘들어요, 쉬고 싶어요’를 아직 말로 하지 못해 몸으로 알리는 것입니다. 그래서 행동을 혼내기보다, 같은 마음을 안전하게 알리는 방법을 가르치면 행동은 함께 줄어듭니다.", "prevent": ["할 일을 아주 작게 줄여 주세요. 처음에는 한두 개만으로 시작합니다.", "시작 전에 무엇을 얼마나 할지 미리 알려 주세요. ‘이거 하나 하고 놀자’처럼 끝이 보이게 말합니다.", "‘먼저–다음’ 카드로 순서를 보여 주세요. 먼저 할 일 다음에 좋아하는 일이 온다는 것을 눈으로 보면 시작하기가 쉬워집니다.", "아주 쉬운 것을 두세 번 먼저 하고 칭찬한 뒤, 조금 어려운 것을 하나 넣어 주세요.", "고를 수 있게 해 주세요. ‘이거 먼저? 저거 먼저?’처럼 순서를 아이가 고르면 피하고 싶은 마음이 줄어듭니다.", "‘쉬고 싶어요’ 카드를 아이 손 닿는 곳에 미리 두세요.", "평소와 달리 갑자기 행동이 늘거나 귀·머리 같은 한 곳을 자꾸 때린다면 아프거나 불편한 것일 수 있습니다. 이럴 때는 할 일을 다시 권하지 말고 몸 상태부터 살펴 주시고 센터에 알려 주세요.", "현관문은 아이가 혼자 열 수 없게 잠가 두세요."], "teach_title": "‘쉬고 싶어요’ 알리기", "teach": {"early": ["행동이 나오지 않는 편한 때에 연습합니다. 쉬운 일을 하다가 엄마가 카드를 보여 주며 ‘쉬고 싶어요’ 하고 말해 주고, 아이가 카드를 건네면(또는 따라 말하면) 바로 ‘그래, 쉬자’ 하고 잠깐 쉬게 합니다.", "실제 상황에서는 행동이 나오기 전에, 힘들어 보이는 순간 엄마가 먼저 카드를 가리켜 줍니다. 손을 잡아 건네게 하지 않고 보여 주기만 합니다.", "아이가 카드나 말로 알리면 그 자리에서 바로 짧게 쉬게 해 주세요. 쉬고 나면 아주 작은 한 가지를 함께 하고 끝냅니다.", "이 단계에서는 할 일을 늘리지 않습니다. 알리면 쉴 수 있다는 것을 먼저 확실히 알게 합니다."], "mid": ["편한 때에 ‘쉬고 싶어요’ 알리기를 연습하고, 알리면 바로 쉬게 해 주세요.", "실제 상황에서 힘들어 보이면 엄마가 카드를 가리켜 주고 잠깐 기다려 주세요. 아이가 알리면 바로 쉬게 합니다.", "쉬고 나면 아주 작은 한 가지를 함께 하고 끝냅니다.", "익숙해지면 시작할 때 ‘하나 더 하고 쉬자’처럼 미리 약속해 할 일을 조금씩 늘립니다. 아이가 알리면 그때는 바로 쉬게 하고, 늘리는 때는 센터와 함께 정합니다."], "high": ["‘쉬고 싶어요’를 스스로 알리면 바로 쉬게 해 주세요.", "알리기가 자리 잡았으면, 시작할 때 ‘하나 더 하고 쉬자’처럼 미리 약속해 할 일을 조금씩 늘립니다. 아이가 ‘쉬고 싶어요’로 알리면 그때는 바로 쉬게 합니다.", "쉬는 시간이 끝나면 ‘이제 하나 더 하자’ 하고 다시 시작하는 연습도 함께 합니다.", "늘리는 양과 때는 센터와 함께 정합니다."]}, "when": {"early": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "머리 박기처럼 스스로를 다치게 하거나 사람을 세게 때릴 때는 할 일을 잠시 멈추고 안전부터 챙겨 주세요. 잠잠해지면 할 일을 아주 작게 줄여 함께 하고 쉬게 하며, 그날 센터에 알려 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "할 일을 없애거나 엄마가 대신 해 주지 않습니다. 대신 해 주면 행동으로 피하는 법을 배우게 됩니다. 그렇다고 억지로 끝까지 시키지도 않습니다.", "잠잠해지면 아주 작은 한 가지만 함께 하고 바로 쉬게 해 주세요. 아이가 손을 빼면 잡지 말고, 할 일을 더 작게(물건 하나 건네기, 손으로 짚기 등) 줄여 다시 권해 주세요. 아주 작은 것이라도 하면 바로 쉬게 합니다.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "mid": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "머리 박기처럼 스스로를 다치게 하거나 사람을 세게 때릴 때는 할 일을 잠시 멈추고 안전부터 챙겨 주세요. 잠잠해지면 할 일을 아주 작게 줄여 함께 하고 쉬게 하며, 그날 센터에 알려 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "할 일을 없애거나 대신 해 주지 않습니다. 억지로 끝까지 시키지도 않습니다.", "잠잠해지면 아주 작은 한 가지만 함께 하고 쉬게 해 주세요. 카드는 다음번 힘들어 보이는 순간, 행동이 나오기 전에 보여 줍니다.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "high": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "머리 박기처럼 스스로를 다치게 하거나 사람을 세게 때릴 때는 할 일을 잠시 멈추고 안전부터 챙겨 주세요. 잠잠해지면 할 일을 아주 작게 줄여 함께 하고 쉬게 하며, 그날 센터에 알려 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "할 일을 없애거나 대신 해 주지 않고, 억지로 끝까지 시키지도 않습니다.", "잠잠해지면 아주 작은 한 가지만 함께 하고 쉬게 해 주세요. ‘쉬고 싶어요’ 알리기는 행동이 나오기 전, 힘들어 보이는 순간에 받아 주는 것입니다.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."]}, "praise": ["‘쉬고 싶어요’를 카드나 말로 알렸을 때 → 바로 ‘말해 줘서 고마워, 쉬자’ 하고 쉬게 해 주세요. 쉬는 것 자체가 가장 큰 칭찬입니다.", "작은 한 가지라도 해냈을 때 → ‘다 했네!’ 하고 구체적으로 말해 주세요.", "행동 없이 할 일을 지나갔을 때 → 끝난 뒤 좋아하는 놀이로 이어 주세요."], "troubles": ["<b>처음 며칠 행동이 더 심해질 때</b> 처음 며칠은 ‘왜 안 통하지?’ 하고 더 세게 할 수 있습니다. 다칠 위험이 없다면 같은 방법을 꾸준히 지켜 주세요. 이때 할 일을 없애 주면 더 센 행동을 배우게 됩니다. 심하면 센터에 알려 주세요.", "<b>카드를 쓰지 않을 때</b> 힘들어 보이는 순간 엄마가 먼저 카드를 보여 주고 ‘쉬고 싶어요?’ 하고 물어 주세요. 손을 잡아 시키지 않습니다.", "<b>밖이나 다른 사람 앞에서 그럴 때</b> 같은 방법으로 해 주세요. 사람들 눈 때문에 할 일을 없애 주지 않도록 미리 마음을 정해 두시면 좋습니다.", "<b>동생이나 형제가 옆에 있을 때</b> 형제를 먼저 안전한 곳으로 옮겨 주시고, 아이에게는 짧고 차분하게 대해 주세요."], "alt_check": "‘쉬고 싶어요’를 알린 횟수", "cards": ["쉬고 싶어요", "먼저–다음"]}, "tangible": {"why": "원하는 물건이나 활동을 얻고 싶을 때 나오는 행동일 수 있습니다. 울거나 떼를 쓴 뒤에 원하는 것을 얻으면, 아이는 ‘이렇게 하면 얻을 수 있다’고 배우게 됩니다.", "meaning": "아이의 행동은 엄마를 이기려는 것이 아니라, ‘그거 주세요, 더 하고 싶어요’를 아직 말로 하지 못해 몸으로 알리는 것입니다. 그래서 말이나 카드로 알리면 얻을 수 있다는 것을 가르치면 행동은 함께 줄어듭니다.", "prevent": ["끝나기 전에 미리 알려 주세요. ‘세 번 더 하고 끝’, ‘이 노래 끝나면 끄자’처럼 끝이 보이게 말합니다.", "‘5-4-3-2-1’ 카드로 남은 횟수를 눈으로 보여 주세요.", "끝난 다음에 할 일을 미리 정해 두세요. 좋아하는 것이 끝나도 다음에 할 일이 있으면 넘어가기가 쉬워집니다.", "원하는 것을 아이가 보이는 곳에 두되 손이 바로 닿지 않게 두어, 알릴 기회를 자주 만들어 주세요.", "‘주세요’ 카드를 아이 손 닿는 곳에 두세요.", "안 되는 것은 미리 정해 두고 끝까지 지켜 주세요. ‘오늘은 안 사’라고 했으면 그날은 어떤 경우에도 주지 않습니다.", "끝낼 때는 억지로 빼앗지 말고, 미리 알린 대로 ‘끝’ 하고 손을 내밀어 받거나 정해진 자리에 함께 놓아 주세요. 놓으면 바로 다음 할 일로 이어 갑니다.", "현관문은 아이가 혼자 열 수 없게 잠가 두세요."], "teach_title": "‘주세요’ 알리기", "teach": {"early": ["행동이 나오지 않는 편한 때에 연습합니다. 좋아하는 것을 보여 주고 엄마가 ‘주세요’ 하고 말해 주거나 카드를 보여 준 뒤, 아이가 소리·몸짓·카드로 알리면 바로 주세요.", "처음에는 아이가 할 수 있는 가장 쉬운 방법(가리키기, 카드 건네기, ‘주’ 소리)으로 시작합니다.", "줄 수 있는 것을 알리면 그 자리에서 바로 주세요. 울 때보다 알릴 때가 훨씬 빨리 얻는다는 것을 알게 하는 것이 핵심입니다. 안 되는 것은 미리 정한 대로 지키고, 대신 고를 수 있는 것을 보여 주세요.", "‘더’를 알리면 한 번은 들어주고, 그다음에는 미리 정한 끝을 지켜 주세요."], "mid": ["편한 때에 ‘주세요’ 알리기를 연습하고, 알리면 바로 주세요.", "실제 상황에서는 원하는 것을 보면 엄마가 카드를 가리켜 주고 잠깐 기다려 주세요. 알리면 바로 줍니다.", "‘더’를 알리면 한 번은 들어주고, 그다음에는 ‘이제 끝’을 지켜 주세요.", "익숙해지면 ‘조금만 기다려, 이거 하고 줄게’ 하고 아주 잠깐 기다린 뒤 주는 연습을 넣습니다. 기다리는 시간은 센터와 함께 정합니다."], "high": ["말로 알리기가 자리 잡았으면, 알린 뒤 아주 잠깐 기다렸다 받는 연습을 합니다.", "‘지금은 안 돼, 대신 이거 할까?’처럼 안 될 때 다른 것을 고르는 연습도 함께 합니다.", "기다리거나 다른 것을 골랐을 때 바로 칭찬해 주세요.", "기다리는 시간을 늘릴지는 센터와 함께 정합니다."]}, "when": {"early": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "스스로를 다치게 하거나 사람을 세게 때릴 때는 원하는 것을 주지 않되 안전을 먼저 챙기고, 그날 센터에 알려 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "울거나 때리는 중에는 원하는 것을 주지 않습니다. 멈춘 직후에도 바로 주지 않습니다. 행동 뒤에 얻으면 행동이 얻는 방법이 됩니다.", "행동하는 중이나 멈춘 직후에 ‘주세요 해 봐’ 하고 시키지 않습니다. 가르치기는 편한 때에 합니다.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "mid": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "스스로를 다치게 하거나 사람을 세게 때릴 때는 원하는 것을 주지 않되 안전을 먼저 챙기고, 그날 센터에 알려 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "울거나 때리는 중에는 원하는 것을 주지 않고, 멈춘 직후에도 주지 않습니다.", "잠잠해지면 평소 하던 일로 돌아가 주세요. 울게 된 물건이 ‘안 된다’고 한 것이었다면 그날은 알맞게 알려도 주지 않습니다. 그 밖의 것은 잠깐 평소처럼 지낸 뒤 알맞게 알리면 그때 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "high": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "스스로를 다치게 하거나 사람을 세게 때릴 때는 원하는 것을 주지 않되 안전을 먼저 챙기고, 그날 센터에 알려 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "행동 뒤에는 원하는 것을 주지 않습니다.", "잠잠해지면 평소 하던 일로 돌아가 주세요. 울게 된 물건이 ‘안 된다’고 한 것이었다면 그날은 알맞게 알려도 주지 않습니다. 그 밖의 것은 잠깐 평소처럼 지낸 뒤 알맞게 알리면 그때 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."]}, "praise": ["줄 수 있는 것을 ‘주세요’로 알렸을 때 → 그 자리에서 바로 주세요. ‘잘했어’보다 원하는 것을 바로 주는 것이 가장 정확한 칭찬입니다.", "끝을 받아들이고 넘어갔을 때 → ‘끝 잘 지켰네!’ 하고 바로 다음 할 일로 이어 주세요.", "기다려 주었을 때 → ‘기다려 줘서 고마워’ 하고 약속대로 주세요."], "troubles": ["<b>처음 며칠 행동이 더 심해질 때</b> 처음 며칠은 더 크게 울거나 오래 할 수 있습니다. 다칠 위험이 없다면 같은 방법을 꾸준히 지켜 주세요. 이때 주면 더 센 행동을 배우게 됩니다. 심하면 센터에 알려 주세요.", "<b>알리지 않고 계속 울 때</b> 울 때는 주지 않고 차분히 기다려 주세요. 요청을 시키지 않고, 잠잠해진 뒤 다음 기회에 엄마가 먼저 카드를 보여 주세요.", "<b>밖(마트·놀이터)에서 그럴 때</b> 나가기 전에 무엇을 사고 무엇을 안 사는지, 언제 집에 가는지 미리 정해 알려 주세요. 사람들 눈 때문에 주지 않도록 미리 마음을 정해 두시면 좋습니다.", "<b>동생이나 형제가 옆에 있을 때</b> 형제를 먼저 안전한 곳으로 옮겨 주시고, 아이에게는 짧고 차분하게 대해 주세요."], "alt_check": "‘주세요’를 알린 횟수", "cards": ["주세요", "5-4-3-2-1"]}, "sensory": {"why": "특정 느낌(보는 것, 소리, 움직임, 촉감)이 즐겁거나 마음이 안정되어 스스로 되풀이하는 행동일 수 있습니다. 다른 사람의 반응과 상관없이, 혼자 있을 때도 자주 나타납니다.", "meaning": "아이의 행동은 말을 안 들으려는 것이 아니라, 그 느낌이 필요해서 스스로 채우는 것입니다. 그래서 무작정 막거나 혼내면 줄지 않고, 같은 느낌을 주는 다른 놀이로 바꿔 주면 행동이 줄어듭니다.", "prevent": ["아이가 좋아하는 느낌과 비슷한 놀잇감을 가까이 두세요(반짝이는 것, 누르는 것, 흔드는 것 등).", "심심한 시간이 길지 않게 해 주세요. 할 일이 없을 때 더 자주 나타날 수 있습니다.", "피곤하거나 주변이 시끄러울 때 늘어나는지 살펴보고, 그런 때는 조용한 곳에서 쉬게 해 주세요.", "몸을 많이 쓰는 놀이(뛰기, 그네, 이불 위 구르기)를 하루 중에 자주 넣어 주세요.", "평소와 달리 갑자기 행동이 늘거나 귀·머리 같은 한 곳을 자꾸 때린다면 아프거나 불편한 것일 수 있습니다. 이럴 때는 다른 것을 권하기보다 몸 상태부터 살펴 주시고 센터에 알려 주세요.", "현관문은 아이가 혼자 열 수 없게 잠가 두세요."], "teach_title": "비슷한 느낌의 다른 놀이로 옮겨 가기", "teach": {"early": ["다칠 위험이 없는 행동이 보이면 비슷한 느낌의 놀잇감을 눈앞에 보여 주고 엄마가 먼저 재미있게 해 보세요.", "아이가 그 놀이로 옮겨 오면 함께 즐겁게 놀아 주세요. 억지로 손을 옮기지 않습니다.", "옮겨 가지 않으면 다칠 위험이 없는 한 잠깐 기다렸다가 다시 보여 줍니다.", "어떤 놀잇감에 잘 옮겨 가는지 적어 두면 센터에서 함께 고를 수 있습니다."], "mid": ["다칠 위험이 없는 행동이 보이면 비슷한 느낌의 놀잇감을 보여 주고 ‘이거 할까?’ 하고 권해 주세요.", "옮겨 오면 함께 즐겁게 놀아 주세요.", "하루 중에 비슷한 느낌의 놀이를 마음껏 할 수 있는 시간을 따로 정해 두세요.", "어떤 놀잇감에 잘 옮겨 가는지 적어 두면 센터에서 함께 고를 수 있습니다."], "high": ["아이 스스로 비슷한 느낌의 놀이를 고를 수 있게 놀잇감 바구니를 정해 두세요.", "스스로 바구니에서 꺼내 놀면 바로 알아봐 주세요.", "해야 할 일이 있을 때는 ‘이거 하고 바구니 놀이 하자’처럼 순서를 정해 주세요.", "늘리거나 바꿀 것은 센터와 함께 정합니다."]}, "when": {"early": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "머리 박기나 깨물기처럼 스스로를 다치게 하는 행동은 막아 주시고, 그날 센터에 알려 주세요.", "혼내거나 큰 소리로 멈추게 하지 않습니다.", "다칠 위험이 없는 행동이면 잠깐 지켜본 뒤, 비슷한 느낌의 놀잇감을 보여 주며 옮겨 가게 도와주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "mid": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "머리 박기나 깨물기처럼 스스로를 다치게 하는 행동은 막아 주시고, 그날 센터에 알려 주세요.", "혼내거나 큰 소리로 멈추게 하지 않습니다.", "다칠 위험이 없는 행동이면 ‘이거 할까?’ 하고 비슷한 느낌의 놀이를 권해 주세요.", "해야 할 일이 있을 때는 ‘먼저–다음’ 카드나 짧은 말로 알려 주세요. 손을 끌어 데려가지 않습니다.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."], "high": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "머리 박기나 깨물기처럼 스스로를 다치게 하는 행동은 막아 주시고, 그날 센터에 알려 주세요.", "혼내지 않습니다.", "아이가 스스로 바구니 놀이로 옮겨 가는지 잠깐 기다려 주세요.", "옮겨 가면 바로 알아봐 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."]}, "praise": ["비슷한 느낌의 다른 놀이로 옮겨 갔을 때 → ‘이것도 재밌네!’ 하고 함께 놀아 주세요.", "해야 할 일을 하고 바구니 놀이로 넘어갔을 때 → 바로 알아봐 주세요.", "엄마가 권한 놀이를 즐겁게 했을 때 → ‘같이 하니까 재밌다!’ 하고 함께 놀아 주세요."], "troubles": ["<b>그 행동을 계속 하려고 할 때</b> 다칠 위험이 있으면 손이나 쿠션으로 먼저 막아 주세요. 그렇지 않으면 억지로 멈추게 하지 말고, 비슷한 느낌의 놀이를 눈앞에 보여 주며 함께 해 보세요.", "<b>다른 놀이로 옮겨 가지 않을 때</b> 비슷한 느낌을 주는 다른 놀잇감으로 바꿔 보여 주세요. 어떤 것이 통하는지 적어 두시면 센터에서 함께 고릅니다.", "<b>밖에서 그럴 때</b> 주머니에 넣을 수 있는 작은 놀잇감(누르기·만지기 장난감)을 챙겨 비슷한 느낌을 대신 채워 주세요.", "<b>피곤하거나 시끄러울 때 늘어날 때</b> 조용한 곳으로 함께 가 쉬게 해 주세요."], "alt_check": "다른 놀이로 옮겨 간 횟수", "cards": ["내 놀이 바구니"]}, "unknown": {"why": "같은 행동이라도 아이마다, 상황마다 이유가 다릅니다. 이유를 모른 채 대처하면 오히려 행동이 늘 수 있어서, 이번 주는 언제·무슨 일 다음에 나오는지 살펴보는 데 집중합니다.", "meaning": "이번 주에 적어 주시는 기록이 가장 중요한 자료입니다. 기록을 보면 행동의 이유가 보이고, 그 이유에 맞는 방법을 센터에서 정해 드립니다.", "prevent": ["이번 주는 행동을 바꾸려 하기보다 평소처럼 지내 주세요.", "주변의 위험한 물건은 미리 치워 두세요.", "기록할 메모지나 휴대폰 메모를 미리 준비해 두세요.", "평소와 달리 갑자기 행동이 늘거나 귀·머리 같은 한 곳을 자꾸 때린다면 아프거나 불편한 것일 수 있습니다. 이럴 때는 다른 것을 권하기보다 몸 상태부터 살펴 주시고 센터에 알려 주세요.", "현관문은 아이가 혼자 열 수 없게 잠가 두세요."], "teach_title": "언제 나오는지 적어 보기", "teach": {"all": ["행동이 나오기 직전에 무슨 일이 있었는지 적어 주세요(직전에 있었던 일).", "어떤 행동이 나왔는지 짧게 적어 주세요(행동).", "그 행동 다음에 어떻게 됐는지 적어 주세요(그 뒤 일). 엄마가 한 일도 함께 적습니다.", "행동이 나올 때마다 이 세 가지를 적어 주세요. 일주일치가 모이면 센터에서 함께 봅니다."]}, "when": {"all": ["다칠 위험이 있을 때는 기다리지 않고 먼저 막는 것이 우선입니다. 머리를 박으면 손바닥이나 쿠션으로 부딪히는 곳을 막고, 때리려 하면 한 걸음 물러서면 됩니다. 찻길·계단 같은 곳이 아니라면 아이를 붙잡거나 안아서 옮기지 않으며, 던질 만한 물건은 미리 치워 두시는 편이 좋습니다.", "찻길·계단·높은 곳처럼 바로 다칠 수 있는 곳에서는 아이 손이나 몸을 잡아 안전한 곳으로 먼저 옮기는 것이 우선이며, 그런 일이 있었던 날은 센터에 알려 주세요.", "동생이나 친구를 때리거나 밀 때는 상대 아이를 먼저 떼어 안전한 곳으로 옮겨 주세요.", "말은 짧고 차분하게 해 주세요. 혼내거나 길게 달래지 않습니다.", "자해(머리 박기 등)는 모른 척하기(쳐다보거나 말 걸지 않기)를 쓰지 않습니다. 막아 주시고 센터에 알려 주세요.", "그 뒤에는 평소처럼 지내 주세요. 지난 일을 다시 이야기하거나 혼내지 않습니다."]}, "praise": ["이번 주는 따로 정한 칭찬 방법이 없습니다. 평소처럼 아이가 잘할 때 알아봐 주세요.", "기록을 남기신 것 자체가 이번 주의 가장 중요한 일입니다."], "troubles": ["<b>기록하기 어려울 때</b> 다 적기 어려우면 세 가지를 한 줄로만 짧게 적어 주세요. 적지 못한 때는 횟수에 바를 정(正) 자로라도 표시해 주세요.", "<b>행동이 더 세지거나 위험할 때</b> 기록을 기다리지 말고 바로 센터에 알려 주세요.", "<b>밖에서 있었던 일</b> 장소가 다르면 이유가 다를 수 있어 중요한 기록입니다. 같은 방법으로 적어 주세요."], "alt_check": "기록한 횟수", "cards": []}}, "skill": {"meaning": "기술을 한 번에 다 가르치면 아이는 어디서부터 해야 할지 모릅니다. 작은 단계로 나누고, 처음에는 함께 하다가 도움을 조금씩 줄이면 아이가 스스로 하는 부분이 늘어납니다. 잘 안 되는 것은 고집이 아니라 아직 배우는 중이기 때문입니다.", "prepare": ["연습할 때와 장소를 매일 같게 정해 주세요. 같은 흐름이 반복되면 아이가 다음을 예상하기 쉬워집니다.", "필요한 물건을 미리 손 닿는 곳에 꺼내 두세요.", "순서 그림(1→2→3)을 붙여 두면 다음 단계를 눈으로 볼 수 있습니다.", "연습 전에 ‘○○ 하고 놀자’처럼 끝난 뒤 좋은 일을 알려 주세요.", "아이가 피곤하거나 배고플 때는 피하고, 여유 있는 때를 골라 주세요."], "steps": {"early": ["엄마가 처음부터 끝까지 천천히 보여 주세요. 말은 짧게, 동작은 크게 합니다.", "마지막 한 동작만 아이에게 남겨 주세요. 아이가 거부하지 않으면 손을 살짝 받쳐 함께 합니다.", "마지막 동작을 하면 바로 칭찬하고 끝냅니다. 끝을 아이가 했다는 느낌이 가장 중요합니다.", "익숙해지면 그 앞 동작도 하나씩 아이에게 넘깁니다."], "mid": ["엄마가 한 번 보여 준 뒤, 아이가 할 수 있는 한두 단계를 맡겨 주세요.", "막히는 곳에서 3~5초 기다려 주세요. 그래도 어려워하면 그 부분만 도와줍니다.", "한 단계라도 스스로 하면 바로 칭찬해 주세요.", "도와주는 손을 조금씩 줄여, 손 대신 손가락으로 가리키기나 말로 알려 주기로 바꿔 갑니다."], "high": ["아이가 처음부터 스스로 시작하게 기다려 주세요.", "막히면 손으로 돕지 말고 ‘다음은?’ 하고 말로만 알려 주세요. 그래도 어려우면 순서 그림을 가리켜 주세요.", "다 하면 ‘혼자 다 했네!’ 하고 분명히 알아봐 주세요.", "익숙해지면 칭찬을 조금씩 줄여, 스스로 하는 것이 자연스러워지게 합니다."]}, "waiting": "도와주기 전에 3~5초 기다려 주세요. 그 짧은 시간이 아이가 스스로 해 볼 기회입니다. 기다려도 어려워하면 그 부분만 도와줍니다.", "praise": ["스스로 한 단계를 했을 때 → 그 순간 바로 ‘혼자 했네!’ 하고 알아봐 주세요.", "시도만 해도 → ‘해 보려고 했구나’ 하고 격려해 주세요.", "연습이 끝나면 좋아하는 놀이로 이어 주세요. 연습 다음에 좋은 일이 온다는 것을 알게 됩니다."], "troubles": ["<b>안 하려고 할 때</b> 억지로 시키지 말고, 아주 작은 한 부분만 함께 하고 끝내 주세요. 아이가 손을 빼면 잡지 않습니다.", "<b>울거나 짜증 낼 때</b> 길게 달래거나 혼내지 말고 차분히 기다려 주세요. 울자마자 좋아하는 것을 주거나 엄마가 대신 끝내 주지 않습니다. 잠잠해지면 아주 쉬운 한 동작만 하고 칭찬하며 끝냅니다.", "<b>너무 쉬워할 때</b> 도와주는 손을 조금 더 빼고, 아이가 스스로 하는 단계를 하나 늘려 주세요.", "<b>도구가 위험할 때(가위·손톱깎이 등)</b> 아이가 움직이거나 손을 빼면 바로 도구를 내려놓아 주세요. 도구 없이 할 수 있는 쉬운 한 동작을 함께 하고 끝냅니다."], "cards": ["순서 그림(빈칸)", "먼저–다음"]}};
+const JARGON3 = ["모방", "유도", "어휘", "발성", "촉구", "강화", "소거", "개입", "대체 행동", "대체행동", "기능", "선행", "일반화", "변별", "자발", "공동주의", "프롬프트", "JAR", "ABA", "ESDM", "모델링", "타행동"];
+// 서버·앱 공통 검사
+// 지어낸 놀잇감·물건을 찾을 때 비교할 글(입력 + 그 갈래의 고정 문장)
+function checkOpts3(b, LIB) {
+  const B = LIB.behavior[b.fn] || LIB.behavior.unknown;
+  return { name: String(b.given || "").trim() || String(b.call || "").replace(/이$/, ""), fn: b.fn, level: b.level, situation: b.situation, comm: b.comm, likes: b.likes, after: b.after, behavior: b.behavior, cards: b.branch === "skill" ? null : B.cards || [], allow: allowText3(b, LIB) };
+}
+function allowText3(b, LIB) {
+  const inp = [b.skill, b.behavior, b.situation, b.after, b.comm, b.likes].map((x) => String(x || "")).join(" ");
+  const fixed = b.branch === "skill" ? JSON.stringify(LIB.skill) : JSON.stringify(LIB.behavior[b.fn] || LIB.behavior.unknown);
+  return inp + " " + fixed;
+}
+const TOYS3 = ["북", "실로폰", "모래", "블록", "미끄럼틀", "까꿍", "외투", "벨크로", "찍찍이", "바구니", "인형", "공놀이", "퍼즐", "풍선", "자동차", "영상", "그림책", "베개", "이불", "스티커", "젤리", "과자", "태블릿", "휴대폰", "노래", "공원", "놀이터", "마트"];
+function check3(branch, d, opts = {}) {
+  const errs = [];
+  if (!d || typeof d !== "object") return ["JSON 아님"];
+  const need = branch === "skill" ? ["title", "why_ex", "prepare_ex", "steps_ex"] : ["title", "why_ex", "prevent_ex", "teach_ex"];
+  need.forEach((k) => { if (typeof d[k] !== "string" || !d[k].trim()) errs.push(k + " 빈칸"); });
+  if (branch === "skill" && (!Array.isArray(d.order) || d.order.filter((x) => String(x || "").trim()).length < 3)) errs.push("order 3개 미만");
+  const order = Array.isArray(d.order) ? d.order.map((x) => String(x || "")) : [];
+  const lines = need.filter((k) => k !== "title").map((k) => String(d[k] || "")).join("\n");
+  const txt = lines + "\n" + String(d.title || "") + "\n" + order.join(" ") + "\n" + String(d.first || "") + " " + String(d.then || "");
+  const teach = String(d.teach_ex || "");
+  const hit = JARGON3.filter((j) => txt.includes(j));
+  if (hit.length) errs.push("전문용어: " + hit.join(", "));
+  if (/%/.test(txt)) errs.push("퍼센트");
+  if (/[぀-ヿ一-鿿]|[A-Za-z]{2,}/.test(txt)) errs.push("한글이 아닌 글자 섞임");
+  if (/�|○○|OO|\{[a-z_]+\}/.test(txt)) errs.push("깨진 글자·빈칸 표시");
+  if (/겁니다|거예요|게 아니라/.test(txt)) errs.push("구어체(겁니다·거예요·게 아니라)");
+  if (/께서|말씀/.test(lines)) errs.push("높임 잘못('께서'·'말씀' 쓰지 않기)");
+  const inpNums = new Set((String(opts.situation || "") + " " + String(opts.after || "")).match(/\d+\s*(분|초)/g) || []);
+  const txtT = txt.replace(/\d+\s*(분|초)/g, (m) => (inpNums.has(m) ? "" : m));
+  if (branch === "skill") { if (/\d+\s*(분|초)/.test(txtT.replace(/3~5초/g, ""))) errs.push("숫자로 정한 시간"); }
+  else if (/\d+\s*~?\s*\d*\s*(분|초)/.test(txtT)) errs.push("행동 대처에 숫자로 정한 시간");
+  const re = /붙잡|붙들|눌러|누르세요|빼앗|뺏|타임아웃|벌을|벌로|들어 옮|안아서 옮|(?<!치)약을|약물|진단|손을 끌어|턱|얼굴을 받|몸을 받|몸을 잡/g;
+  let m;
+  while ((m = re.exec(txt))) {
+    const after = txt.slice(m.index + m[0].length, m.index + m[0].length + 16);
+    if (!/^[^.\n]{0,9}(지 마|지 않|지 말|지는 마|지는 말|지는 않|면 안)/.test(after)) { errs.push("금지 표현(" + m[0] + ")"); break; }
+  }
+  const why = String(d.why_ex || "").trim();
+  if (why && !/수 있습니다\.?$/.test(why)) errs.push("why_ex는 '~수 있습니다'로 끝낼 것");
+  ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { const v = String(d[k] || "").trim(); if (v.length > 190) errs.push(k + " 너무 김(180자 안으로)"); if (v.startsWith("→")) errs.push(k + " 앞의 →는 쓰지 말 것"); });
+  if (opts.name && !lines.includes(opts.name)) errs.push("아이 호칭 없음");
+  if (/대신할 행동은/.test(txt)) errs.push("'대신할 행동은 ~' 제목 되풀이");
+  const nums = txt.replace(/세 번 더/g, "").replace(/한두|한 번/g, "").replace(/3~5초/g, "");
+  if (/(두|세|네|다섯|여섯) (번|명|개|바퀴)|\d+\s*(번|명|개|바퀴)/.test(nums)) errs.push("숫자로 정한 횟수·차례");
+  if (/해 봐[’'」]|해 봐\.|라고 말해|말하게 하|따라 해 봐/.test(txt)) errs.push("아이에게 말을 시킴('~해 봐')");
+  if (branch === "behavior" && opts.fn === "escape" && !/[‘']쉬고 싶어요[’']/.test(teach)) errs.push("teach_ex에 ‘쉬고 싶어요’가 없음");
+  if (branch === "behavior" && opts.fn === "tangible" && !/[‘'][^’']*주세요[’']/.test(teach)) errs.push("teach_ex에 ‘~ 주세요’가 없음");
+  if (branch === "behavior" && opts.fn === "attention" && !/[‘'](엄마|아빠|할머니|할아버지|언니|오빠|누나|형|선생님|봐 주세요)/.test(teach)) errs.push("teach_ex에 부르는 말이 없음");
+  if (branch === "behavior" && opts.fn === "attention" && /아빠/.test(opts.situation || "") && !/아빠/.test(teach)) errs.push("상황은 아빠인데 아빠 부르기가 없음");
+  if (branch === "behavior" && /(박으면|때리면|던지면|물면|지르면|울면|드러누우면|두드리면|흔들면|돌리면|박을 때|때릴 때)[^.]{0,40}(권해|말해|말을 걸|보여 주|막아|안을까|할까)/.test(teach + String(d.prevent_ex || ""))) errs.push("예시 줄에 행동 중 대처를 씀");
+  if (branch === "behavior" && opts.fn === "sensory" && /말로|낱말로|소리로|말하며|말하는 연습/.test(teach)) errs.push("자기자극에 말로 요청하기를 넣음");
+  if (branch === "behavior" && /싫어|아니야/.test(teach) && /쉬게|쉬자/.test(teach)) errs.push("‘싫어’·‘아니야’를 쉬자는 말로 받음(원장님 결정 전)");
+  const sentN = (v) => String(v || "").split(/[.!?]\s/).filter((x) => x.trim()).length;
+  ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { if (sentN(d[k]) > 2) errs.push(k + " 세 문장 이상"); });
+  if (/시면 되고/.test(lines)) errs.push("'~시면 되고' 연결");
+  if (/(두|한) 낱말로/.test(lines)) errs.push("입력 칸의 말을 그대로 옮김('두 낱말로')");
+  if (branch === "behavior" && opts.fn === "unknown" && /평소처럼|바꾸려 하지/.test(String(d.prevent_ex || ""))) errs.push("이유 모름 prevent_ex에 '평소처럼'");
+  const sit = String(opts.situation || "") + " " + String(opts.behavior || "");
+  if (branch === "behavior" && /머리|귀/.test(sit) && /때리|때림|박/.test(sit) && ["escape", "sensory", "unknown"].includes(opts.fn) && !/몸 상태|아프|아픈/.test(String(d.prevent_ex || ""))) errs.push("머리·귀 때리기인데 몸 상태 살피기 없음");
+  if (branch === "behavior" && /찻길|도로|차도|뛰어나|밖으로|현관/.test(sit) && !/현관문/.test(String(d.prevent_ex || ""))) errs.push("뛰어나가는 행동인데 현관문 잠그기 없음");
+  if (branch === "behavior" && opts.fn === "escape" && /놀이(하다|하는 중|중에|하다가)/.test(teach)) errs.push("쉬기 연습을 노는 중에 함");
+  if (branch === "behavior" && opts.fn === "tangible" && /가기 전/.test(teach) && /주세요/.test(teach)) errs.push("줄 수 없는 때에 ‘주세요’ 연습");
+  if (branch === "skill") {
+    const last = order[order.length - 1] || "";
+    if (opts.level === "early" && /놓기$|내려놓기|거두기|버리기$/.test(last)) errs.push("마지막 단계가 뒷정리 동작");
+    // 엄마 몫 = '엄마가'가 들어 있는 마디(쉼표로 나눔)
+    const momPart = String(d.steps_ex || "").split(/,\s*|\.\s*/).filter((x) => /엄마가/.test(x) && !(opts.name && x.includes(opts.name))).join(" ");
+    if (/헹구|앉기|내밀|기울|마시기|내쉬|소변 보/.test(momPart) && /엄마가/.test(momPart) && opts.level === "early") errs.push("엄마 몫에 아이 몸의 동작");
+    if (/코에|얼굴|입에 대/.test(momPart)) errs.push("엄마가 얼굴·코·입에 손대는 동작");
+  }
+  if (/부터 처음부터/.test(txt)) errs.push("'부터 처음부터' 겹침");
+  if (/(두|세|네|다섯) 단계/.test(txt)) errs.push("단계 수를 숫자로 씀(단계 이름을 쓸 것)");
+  const inpAll = [opts.situation, opts.comm, opts.likes, opts.after].map((x) => String(x || "")).join(" ");
+  const st = ["피곤", "졸린", "졸려", "배고", "심심"].filter((w) => lines.includes(w) && !inpAll.includes(w) && !String(opts.allow || "").includes(w));
+  if (st.length) errs.push("입력에 없는 아이 상태(" + st.join(", ") + ")");
+  if (branch === "behavior" && opts.fn === "tangible" && !/줄 수 있/.test(teach)) errs.push("teach_ex에 '줄 수 있는 것일 때'가 없음");
+  if (branch === "behavior" && (opts.fn === "tangible" || opts.fn === "attention") && opts.level === "high" && !/기다/.test(teach)) errs.push("상위 단계인데 기다리기가 없음");
+  if (branch === "behavior" && (/소리/.test(String(opts.behavior || "")) || /울음|소리 지르/.test(String(opts.comm || ""))) && /소리(나|로|를 내|가 나)/.test(teach)) errs.push("줄이려는 행동(소리·울음)을 알리기로 받음");
+  if (branch === "behavior" && Array.isArray(opts.cards)) {
+    const cm = [...teach.matchAll(/[‘']([^’']+)[’']\s*카드/g)].map((x) => x[1]).filter((x) => !opts.cards.includes(x));
+    if (cm.length) errs.push("자료에 없는 카드(" + cm.join(", ") + ")");
+  }
+  if (branch === "skill" && String(d.then || "").trim() && String(d.then).trim() === String(d.first || "").trim()) errs.push("then이 first와 같음");
+  if (branch === "skill" && order.some((o) => /마치기|끝내기|알기|신호|참기|기다리기/.test(o))) errs.push("order에 동작이 아닌 단계");
+  if (/쉬고 싫어|''|’’|‘‘/.test(txt)) errs.push("카드 이름·따옴표가 틀림");
+  if (opts.allow) {
+    const made = TOYS3.filter((t) => !(branch === "skill" && /이불|베개|바구니|노래/.test(t)) && txt.includes(t) && !opts.allow.includes(t));
+    if (made.length) errs.push("입력에 없는 물건·놀이(" + made.join(", ") + ")");
+  }
+  return errs;
+}
+
+const splitB = (s) => { const m = String(s).match(/^<b>(.*?)<\/b>\s*(.*)$/); return m ? { when: m[1], do: m[2] } : { when: "", do: String(s) }; };
+const splitArrow = (s) => { const i = String(s).indexOf(" → "); return i > 0 ? { when: s.slice(0, i), do: s.slice(i + 3) } : { when: "", do: String(s) }; };
+function buildLib3(inp, ex) {
+  const e = ex || {};
+  const s = (v) => (typeof v === "string" ? v.trim() : "");
+  const first = s(e.first), then = s(e.then);
+  if (inp.branch === "skill") {
+    const S = LIB.skill;
+    const lv = ["early", "mid", "high"].includes(inp.level) ? inp.level : "mid";
+    const order = Array.isArray(e.order) ? e.order.map(s).filter(Boolean).slice(0, 5) : [];
+    return {
+      lib: 3, title: s(e.title) || inp.skill || "생활 기술", center: inp.center || "",
+      meaning: S.meaning, why_ex: s(e.why_ex),
+      prepare: S.prepare.map((x) => x.replace("‘○○ 하고 놀자’", first ? `‘${first} 하고 놀자’` : "‘다 하고 놀자’")), prepare_ex: s(e.prepare_ex),
+      order, steps: S.steps[lv].slice(), steps_ex: s(e.steps_ex), waiting: S.waiting,
+      praise: S.praise.map(splitArrow), troubles: S.troubles.map(splitB),
+      check: ["연습한 날(○ 표시)", "혼자 한 단계 수"],
+      first: first || (inp.skill || ""), then: then || "놀이", cards: S.cards.slice(),
+    };
+  }
+  const fn = LIB.behavior[inp.fn] ? inp.fn : "unknown";
+  const B = LIB.behavior[fn];
+  const lv = fn === "unknown" ? "all" : (["early", "mid", "high"].includes(inp.level) ? inp.level : "mid");
+  return {
+    lib: 3, fn, title: s(e.title) || inp.behavior || "행동 대처", center: inp.center || "",
+    why: B.why, why_ex: s(e.why_ex), meaning: B.meaning,
+    prevent: B.prevent.slice(), prevent_ex: s(e.prevent_ex),
+    teach_title: B.teach_title, teach: (B.teach[lv] || []).slice(), teach_ex: s(e.teach_ex),
+    when: (B.when[lv] || []).slice(), praise: (B.praise || []).map(splitArrow), troubles: (B.troubles || []).map(splitB),
+    check: fn === "unknown" ? [B.alt_check] : ["행동이 나온 횟수", B.alt_check],
+    first: first || "할 일", then: then || "놀이", cards: (B.cards || []).slice(),
+  };
+}
+
+function toText3(r, view) {
+  const d = r.data || {};
+  const T = view === "teacher";
+  const call = r.input?.call || "아이";
+  const L = [];
+  const sec = (h) => { L.push(""); L.push(`■ ${h}`); };
+  const ex = (v) => { if (v) L.push(`→ ${call}라면: ${v}`); };
+  const list = (a) => (a || []).forEach((s) => L.push(`· ${s}`));
+  const pairs = (a) => (a || []).forEach((t) => L.push(t.when ? `· ${t.when} → ${t.do}` : `· ${t.do}`));
+  const week = (label) => L.push(`${label}: 월(  ) 화(  ) 수(  ) 목(  ) 금(  ) 토(  ) 일(  )`);
+  const ev = evidenceFor(r);
+  L.push(`[검단ABA · 집에서 하는 5분] ${d.title || ""}`);
+  L.push(INTRO(call));
+  if (r.branch === "skill") {
+    sec("왜 연습할까요");
+    if (d.center) L.push(`센터에서 본 모습: ${d.center}`);
+    L.push(d.meaning); ex(d.why_ex);
+    sec("준비"); list(d.prepare); ex(d.prepare_ex);
+    sec("단계별로 돕기");
+    if ((d.order || []).length) L.push(`순서: ${d.order.join(" → ")}`);
+    (d.steps || []).forEach((s, i) => L.push(`${i + 1}. ${s}`)); ex(d.steps_ex);
+    L.push(`기다리기: ${d.waiting}`);
+    sec("칭찬은 이때"); pairs(d.praise);
+    sec("이럴 땐 이렇게"); pairs(d.troubles);
+    sec("이번 주 기록"); (d.check || []).forEach(week);
+  } else {
+    if (r.input?.danger) { sec(SAFETY_TITLE); list(safetyLinesFor(r.input)); }
+    sec("행동의 이유");
+    if (d.center) L.push(`센터에서 본 모습: ${d.center}`);
+    L.push(d.why); ex(d.why_ex);
+    L.push(`행동의 의미: ${d.meaning}`);
+    sec("미리 막기"); list(d.prevent); ex(d.prevent_ex);
+    sec(`대신할 행동 가르치기 — ${d.teach_title}`); (d.teach || []).forEach((s, i) => L.push(`${i + 1}단계. ${s}`)); ex(d.teach_ex);
+    sec("행동이 나오면"); list(d.when);
+    if ((d.praise || []).length) { sec("칭찬은 이때"); pairs(d.praise); }
+    sec("이럴 땐 이렇게"); pairs(d.troubles);
+    sec("이번 주 기록"); (d.check || []).forEach(week);
+    L.push("행동이 나왔을 때 한 줄 기록: 날짜·시간 / 직전에 있었던 일 / 행동 / 그 뒤 어떻게 됐나요");
+  }
+  L.push(NEXT_NOTE);
+  if (ev) { sec("이 방법을 쓰는 이유"); L.push(ev.mom); if (T) L.push(`(선생님용 근거) ${ev.teacher}`); }
+  L.push("");
+  L.push("© 검단ABA언어행동연구소 | 민다혜 (BCBA)");
+  return L.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+  return { BRANCHES, BRANCH_LABEL, PLAY_GOALS, SKILL_GROUPS, BEHAVIORS, FNS, FN_LABEL, LEVEL3, LEVEL3_HINT, LEVEL3_LABEL, SAFETY_TITLE, SAFETY_LINES, EVIDENCE, EVIDENCE_NOTE, evidenceFor, NEXT_NOTE, troubleLabels, safetyLinesFor, INTRO, JARGON, momStrings, appCheck, cleanData, localPlay, localSkill, localBehavior, toText, jarToPlay, LIB, checkOpts3, allowText3, check3, buildLib3 };
 })();
-const { BRANCHES, BRANCH_LABEL, PLAY_GOALS, SKILL_GROUPS, BEHAVIORS, FNS, FN_LABEL, LEVEL3, LEVEL3_HINT, LEVEL3_LABEL, SAFETY_TITLE, SAFETY_LINES, EVIDENCE, EVIDENCE_NOTE, evidenceFor, NEXT_NOTE, troubleLabels, safetyLinesFor, INTRO, JARGON, momStrings, appCheck, cleanData, localPlay, localSkill, localBehavior, toText, jarToPlay } = HomeLib;
+const { BRANCHES, BRANCH_LABEL, PLAY_GOALS, SKILL_GROUPS, BEHAVIORS, FNS, FN_LABEL, LEVEL3, LEVEL3_HINT, LEVEL3_LABEL, SAFETY_TITLE, SAFETY_LINES, EVIDENCE, EVIDENCE_NOTE, evidenceFor, NEXT_NOTE, troubleLabels, safetyLinesFor, INTRO, JARGON, momStrings, appCheck, cleanData, localPlay, localSkill, localBehavior, toText, jarToPlay, LIB, checkOpts3, allowText3, check3, buildLib3 } = HomeLib;
 
 // ============================================================
 // 가정 자료 (예전 이름: 함께놀이 플래너 ESDM JAR)
@@ -3423,6 +3604,38 @@ goals는 위 ESDM 커리큘럼 영역(${
     setEditing(false);
 
     let data = null, source = "ai", note = "";
+    // 생활 기술·행동 대처: 원장 승인 문장은 앱이 넣고, AI는 '→ ○○라면' 예시 줄만 쓴다
+    if (inp.branch !== "play") {
+      let ex = null;
+      try {
+        const headers = await authHeaders();
+        const res = await fetch(HOME_AI_URL, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            lib: 3, branch: inp.branch, call: inp.call, given: inp.given,
+            skill: inp.skill, level: inp.level,
+            behavior: inp.behavior, situation: inp.situation, after: inp.after, comm: inp.comm, fn: inp.fn,
+            likes: inp.likes,
+          }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok || !j.data) throw new Error(j.error || "AI 서버 응답 오류 " + res.status);
+        const errs = check3(inp.branch, j.data, checkOpts3(inp, LIB));
+        if (errs.length) throw new Error("확인에 걸림: " + errs.join(", "));
+        ex = j.data;
+      } catch (e) {
+        console.error("[가정 자료 AI 예시 줄]", e);
+        source = "fixed";
+        note = "AI 예시 줄을 쓰지 못해 원장님 승인 문장만으로 만들었어요. 다시 만들기를 누르면 예시 줄을 다시 받아 볼 수 있어요.";
+      }
+      data = buildLib3(inp, ex);
+      setResult({ v: 3, branch: inp.branch, source, input: inp, data, made: new Date().toISOString() });
+      setAiNote(note);
+      setLoading(false);
+      if (isMobile) setTimeout(() => { try { outRef.current && outRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {} }, 100);
+      return;
+    }
     try {
       const headers = await authHeaders();
       const res = await fetch(HOME_AI_URL, {
@@ -4050,7 +4263,9 @@ goals는 위 ESDM 커리큘럼 영역(${
                 <MiniLabel>아이가 지금 쓰는 표현 방법</MiniLabel>
                 <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={comm} placeholder="예: 한두 단어 말, 손 끌기" onChange={(e) => setComm(e.target.value)} />
                 <MiniLabel>대신할 행동</MiniLabel>
-                <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={altText} placeholder="비우면 아이에게 맞게 정해서 씁니다" onChange={(e) => setAltText(e.target.value)} />
+                <div style={{ fontSize: 12.5, color: C.ink, background: "#F7F4F1", borderRadius: 8, padding: "7px 10px", lineHeight: 1.5 }}>
+                  {fn && LIB.behavior[fn] ? <><b>{LIB.behavior[fn].teach_title}</b><span style={{ color: C.sub }}> · 예상 이유에 맞춰 원장님 승인 문장으로 정해집니다</span></> : <span style={{ color: C.sub }}>예상 이유를 고르면 정해집니다</span>}
+                </div>
               </>
             )}
             <MiniLabel>센터에서 본 모습</MiniLabel>
@@ -4060,7 +4275,7 @@ goals는 위 ESDM 커리큘럼 영역(${
               placeholder={"예: 변기에 옷 입은 채 앉기 10번 중 7번 거부 없이 함."}
               onChange={(e) => setCenterNote(e.target.value)}
             />
-            <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>적을수록 이 아이 이야기가 됩니다. 적은 사실과 숫자만 씁니다.</div>
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>{branch === "play" ? "적을수록 이 아이 이야기가 됩니다. 적은 사실과 숫자만 씁니다." : "적은 글이 엄마 자료의 ‘센터에서 본 모습’에 그대로 들어갑니다. 엄마가 읽기 쉬운 말로 적어 주세요."}</div>
             <MiniLabel>좋아하는 것</MiniLabel>
             <input style={{ ...styles.addInput, width: "100%", boxSizing: "border-box" }} value={likes} placeholder="예: 뽀로로 스티커, 젤리" onChange={(e) => setLikes(e.target.value)} />
           </FormBox>
@@ -4271,6 +4486,9 @@ const hs = {
   cell: { height: 38, border: `1px solid ${PINK_LINE}`, borderRadius: 6, fontSize: 11, color: C.sub, textAlign: "center", paddingTop: 3, boxSizing: "border-box" },
   meta: { fontSize: 12.5, color: "#5E5257", background: "#F4F1F2", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.6 },
   why: { border: `1px dashed ${PINK}`, borderRadius: 10, padding: "10px 14px", background: "#fff" },
+  ex: { fontSize: 13, background: "#FFFBEF", border: "1px solid #F1E3C2", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", color: "#5A4520", lineHeight: 1.65, breakInside: "avoid", pageBreakInside: "avoid" },
+  exT: { fontSize: 13, background: "#FFF8E6", border: "1px dashed #E0A13A", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", color: "#6b4a00", lineHeight: 1.65 },
+  exTag: { marginLeft: 6, fontSize: 11, color: "#B07A12", border: "1px solid #E0A13A", borderRadius: 4, padding: "0 4px" },
   foot: { marginTop: 22, paddingTop: 10, borderTop: `1px solid ${PINK_LINE}`, fontSize: 11.5, color: C.sub, textAlign: "center", lineHeight: 1.6 },
 };
 
@@ -4406,6 +4624,155 @@ function WhyPart({ r, T, n }) {
   );
 }
 
+// v3: 원장 승인 문장(고정) + '→ ○○라면' 예시 줄(AI). 선생님용 보기에서는 예시 줄을 노란 점선으로 표시한다.
+function Ex({ p, call, T }) {
+  const { data } = React.useContext(EditCtx);
+  if (!String(getAt(data, p) || "").trim()) return null;
+  return (
+    <div style={T ? hs.exT : hs.ex}>
+      <b>→ {call}라면:</b> <Ed p={p} />
+      {T && <span style={hs.exTag}>AI 예시 줄</span>}
+    </div>
+  );
+}
+function PairCards({ d, k }) {
+  return <Cards items={(d[k] || []).map((t, i) => (t.when ? <><b><Ed p={[k, i, "when"]} /></b><br /><Ed p={[k, i, "do"]} /></> : <Ed p={[k, i, "do"]} />))} />;
+}
+function AbcTable({ rows }) {
+  const th = { border: `1px solid ${PINK_LINE}`, background: PINK_SOFT, padding: "6px 4px", fontSize: 12, color: "#8A3E50" };
+  const td = { border: `1px solid ${PINK_LINE}`, height: 30 };
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", breakInside: "avoid", pageBreakInside: "avoid" }}>
+      <thead><tr><th style={{ ...th, width: "18%" }}>날짜·시간</th><th style={th}>직전에 있었던 일</th><th style={th}>행동</th><th style={th}>그 뒤 어떻게 됐나요</th></tr></thead>
+      <tbody>{Array.from({ length: rows }).map((_, i) => <tr key={i}><td style={td} /><td style={td} /><td style={td} /><td style={td} /></tr>)}</tbody>
+    </table>
+  );
+}
+const CARD_ICON = { "쉬고 싶어요": "✋", "봐 주세요": "👀", "엄마": "🙋", "기다리는 중": "⏳", "주세요": "🤲", "내 놀이 바구니": "🧺" };
+function CutCards({ d }) {
+  const box = { border: "2px dashed #bbb", borderRadius: 12, minHeight: 120, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 18, gap: 4, padding: 8, boxSizing: "border-box", textAlign: "center", breakInside: "avoid", pageBreakInside: "avoid" };
+  const items = (d.cards || []).map((c, i) => {
+    if (c === "먼저–다음") return (
+      <div key={i} style={{ ...box, flexDirection: "row", padding: 0, width: 300 }}>
+        <div style={{ flex: 1, padding: 8 }}><div style={{ fontSize: 12, color: C.sub }}>먼저</div><Ed p={["first"]} /></div>
+        <div style={{ flex: 1, padding: 8, borderLeft: "2px solid #eee" }}><div style={{ fontSize: 12, color: C.sub }}>다음</div><Ed p={["then"]} /></div>
+      </div>
+    );
+    if (c === "5-4-3-2-1") return <div key={i} style={{ ...box, width: 300, letterSpacing: 6 }}>5 4 3 2 1<div style={{ fontSize: 12, color: C.sub, letterSpacing: 0 }}>끝나기 전에 손가락으로 함께 세기</div></div>;
+    if (c.startsWith("순서 그림")) return (
+      <div key={i} style={{ display: "flex", gap: 6, flexWrap: "wrap", width: "100%" }}>
+        {((d.order || []).length ? d.order : ["", "", ""]).map((o, j) => (
+          <div key={j} style={{ ...box, width: 120, minHeight: 100, fontSize: 14 }}><div style={{ fontSize: 12, color: C.sub }}>{j + 1}</div>{o ? <Ed p={["order", j]} /> : null}</div>
+        ))}
+      </div>
+    );
+    return <div key={i} style={{ ...box, width: 170 }}><div style={{ fontSize: 34 }}>{CARD_ICON[c] || ""}</div>{c}</div>;
+  });
+  if (!items.length) return null;
+  return (
+    <>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>{items}</div>
+      <div style={{ fontSize: 12, color: C.sub, marginTop: 6 }}>점선을 따라 오려서 손 닿는 곳에 붙여 두세요. 아이가 좋아하는 그림으로 바꿔 써도 됩니다.</div>
+    </>
+  );
+}
+function CenterNote({ d }) {
+  if (!String(d.center || "").trim()) return null;
+  return (
+    <>
+      <Sub>센터에서 본 모습</Sub>
+      <div style={{ ...hs.card, background: PINK_SOFT }}><div style={{ minWidth: 0 }}><Ed p={["center"]} /></div></div>
+    </>
+  );
+}
+function Lib3Body({ r, T, n, call }) {
+  const d = r.data || {};
+  const inp = r.input || {};
+  const ev = evidenceFor(r);
+  const Why = () => (
+    <Sec n={n()} h="이 방법을 쓰는 이유">
+      <div style={hs.why}>
+        <P>{ev ? ev.mom : ""}</P>
+        {T && ev && <div style={hs.teacher}>선생님용 근거 · {ev.teacher}<br />{EVIDENCE_NOTE}</div>}
+      </div>
+    </Sec>
+  );
+  if (r.branch === "skill") {
+    return (
+      <>
+        <Sec n={n()} h="왜 연습할까요">
+          <CenterNote d={d} />
+          <P><Ed p={["meaning"]} /></P>
+          <Ex p={["why_ex"]} call={call} T={T} />
+        </Sec>
+        <Sec n={n()} h="준비">
+          <Cards items={eds(d, "prepare")} />
+          <Ex p={["prepare_ex"]} call={call} T={T} />
+        </Sec>
+        <Sec n={n()} h={`단계별로 돕기 · ${LEVEL3_LABEL[inp.level] || ""}`}>
+          {(d.order || []).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 8 }}>
+              {d.order.map((o, i) => <React.Fragment key={i}>{i > 0 && <span style={{ color: C.sub }}>→</span>}<span style={hs.chip}><Ed p={["order", i]} /></span></React.Fragment>)}
+            </div>
+          )}
+          <Cards items={eds(d, "steps")} steps />
+          <Ex p={["steps_ex"]} call={call} T={T} />
+          <div style={{ ...hs.card, background: PINK_SOFT }}><div style={{ minWidth: 0 }}><b>기다려 주세요</b><br /><Ed p={["waiting"]} /></div></div>
+        </Sec>
+        <Sec n={n()} h="칭찬은 이때"><PairCards d={d} k="praise" /></Sec>
+        <Sec n={n()} h="이럴 땐 이렇게"><PairCards d={d} k="troubles" /></Sec>
+        <Sec n={n()} h="이번 주 기록">
+          {(d.check || []).map((c, i) => <CheckRow key={i} label={c} />)}
+          <P>{NEXT_NOTE}</P>
+        </Sec>
+        {Why()}
+        {(d.cards || []).length > 0 && <Sec n={n()} h="오려 쓰는 카드"><CutCards d={d} /></Sec>}
+      </>
+    );
+  }
+  const unknown = d.fn === "unknown";
+  return (
+    <>
+      {inp.danger && (
+        <div style={hs.safety}>
+          <div style={hs.safetyH}>⚠ {SAFETY_TITLE}</div>
+          <Cards items={safetyLinesFor(inp)} />
+        </div>
+      )}
+      <Sec n={n()} h="행동의 이유">
+        <CenterNote d={d} />
+        <Sub>왜 그럴까요</Sub>
+        <P><Ed p={["why"]} /></P>
+        <Ex p={["why_ex"]} call={call} T={T} />
+        <Sub>행동의 의미</Sub>
+        <div style={{ ...hs.card, background: PINK_SOFT }}><div style={{ minWidth: 0 }}><Ed p={["meaning"]} /></div></div>
+      </Sec>
+      <Sec n={n()} h="미리 막기 (예방)">
+        <Cards items={eds(d, "prevent")} />
+        <Ex p={["prevent_ex"]} call={call} T={T} />
+      </Sec>
+      <Sec n={n()} h={unknown ? d.teach_title : `대신할 행동 가르치기 — ${d.teach_title}`}>
+        <Cards items={eds(d, "teach")} steps />
+        <Ex p={["teach_ex"]} call={call} T={T} />
+      </Sec>
+      <Sec n={n()} h="행동이 나오면">
+        <Cards items={eds(d, "when")} />
+      </Sec>
+      {(d.praise || []).length > 0 && <Sec n={n()} h="칭찬은 이때"><PairCards d={d} k="praise" /></Sec>}
+      <Sec n={n()} h="이럴 땐 이렇게"><PairCards d={d} k="troubles" /></Sec>
+      <Sec n={n()} h="이번 주 기록">
+        {(d.check || []).map((c, i) => <CheckRow key={i} label={c} />)}
+        <Sub>행동이 나왔을 때 간단히 적기 (한 줄이면 됩니다)</Sub>
+        <AbcTable rows={unknown ? 7 : 3} />
+        <Sub>다음 주에는</Sub>
+        <P>{unknown ? "적어 주신 기록을 보고 이유에 맞는 방법을 센터에서 함께 정하겠습니다." : "기록을 보고 다음 단계로 넘어갈지 센터에서 함께 정하겠습니다."}</P>
+      </Sec>
+      {Why()}
+      {(d.cards || []).length > 0 && <Sec n={n()} h="오려 쓰는 카드"><CutCards d={d} /></Sec>}
+    </>
+  );
+}
+
 function HomeSheet({ r, view, edit, onEdit }) {
   return (
     <EditCtx.Provider value={{ edit: !!edit, onEdit, data: r.data || {} }}>
@@ -4463,7 +4830,7 @@ function HomeSheetBody({ r, view }) {
           {r.branch === "play" && <> · 단계 {(inp.levels || []).join("+")}</>}
           {r.branch === "skill" && <> · {LEVEL3_LABEL[inp.level]}</>}
           {r.branch === "behavior" && <> · 예상 이유 {FN_LABEL[inp.fn] || "-"} · {LEVEL3_LABEL[inp.level]}</>}
-          {" · "}{r.source === "ai" ? "AI로 작성" : r.source === "old" ? "예전 계획" : "미리 쓴 문구"}
+          {" · "}{d.lib === 3 ? (r.source === "ai" ? "승인 문장 + AI 예시 줄" : "승인 문장만(예시 줄 없음)") : r.source === "ai" ? "AI로 작성" : r.source === "old" ? "예전 계획" : "미리 쓴 문구"}
           {d.teacher_note && <div style={{ marginTop: 4 }}>{d.teacher_note}</div>}
         </div>
       )}
@@ -4521,7 +4888,9 @@ function HomeSheetBody({ r, view }) {
         </>
       )}
 
-      {r.branch === "skill" && (
+      {d.lib === 3 && <Lib3Body r={r} T={T} n={n} call={call} />}
+
+      {r.branch === "skill" && d.lib !== 3 && (
         <>
           <Sec n={n()} h="이번 주 목표">
             <CenterPart d={d} />
@@ -4555,7 +4924,7 @@ function HomeSheetBody({ r, view }) {
         </>
       )}
 
-      {r.branch === "behavior" && (
+      {r.branch === "behavior" && d.lib !== 3 && (
         <>
           {inp.danger && (
             <div style={hs.safety}>
