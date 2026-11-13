@@ -1858,7 +1858,7 @@ function check3(branch, d, opts = {}) {
   }
   const why = String(d.why_ex || "").trim();
   if (why && !/수 있습니다\.?$/.test(why)) errs.push("why_ex는 '~수 있습니다'로 끝낼 것");
-  ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { const v = String(d[k] || "").trim(); if (v.length > 180) errs.push(k + " 너무 김(180자 안으로)"); if (v.startsWith("→")) errs.push(k + " 앞의 →는 쓰지 말 것"); });
+  ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { const v = String(d[k] || "").trim(); if (v.length > (k === "teach_ex" ? 230 : 180)) errs.push(k + " 너무 김"); if (v.startsWith("→")) errs.push(k + " 앞의 →는 쓰지 말 것"); });
   if (opts.name && !lines.includes(opts.name)) errs.push("아이 호칭 없음");
   if (/대신할 행동은/.test(txt)) errs.push("'대신할 행동은 ~' 제목 되풀이");
   const nums = txt.replace(/세 번 더/g, "").replace(/한두|한 번/g, "").replace(/3~5초/g, "");
@@ -1887,7 +1887,7 @@ function check3(branch, d, opts = {}) {
     // 엄마 몫 = '엄마가'가 들어 있는 마디(쉼표로 나눔)
     const momPart = String(d.steps_ex || "").split(/,\s*|\.\s*/).filter((x) => /엄마가/.test(x) && !(opts.name && x.includes(opts.name))).join(" ");
     if (/헹구|앉기|내밀|기울|마시기|내쉬|소변 보/.test(momPart) && /엄마가/.test(momPart) && opts.level === "early") errs.push("엄마 몫에 아이 몸의 동작");
-    if (/코에|얼굴|입에 대/.test(momPart)) errs.push("엄마가 얼굴·코·입에 손대는 동작");
+    if (/코에|얼굴|입에 대/.test(momPart.replace(/‘[^’]*’/g, ""))) errs.push("엄마가 얼굴·코·입에 손대는 동작");
   }
   if (/엄마가[^.]{0,25}(주시면|주셨|주십니다|하셨|하십니다)/.test(lines)) errs.push("엄마를 높임('주시면'·'주셨' 대신 '주면'·'해 주면')");
   if (/'[^'\n]{1,30}'/.test(lines)) errs.push("따옴표는 ‘ ’를 쓸 것");
@@ -1920,7 +1920,7 @@ function check3(branch, d, opts = {}) {
     if (/익숙해졌|할 수 있(지만|어도|는데|으나)|까지(는)? 할 수|할 수 있습니다\.?$|낯설|불편/.test(wy)) errs.push("why_ex에 지어낸 능력·느낌");
     if (!/어렵|어려|힘들|헷갈|놓치|흘리|막히/.test(wy)) errs.push("why_ex에 어려운 점이 없음");
     const th = String(d.then || "").trim();
-    if (th && String(d.prepare_ex || "").includes(th) && /연습|으로|를 두|을 두/.test(String(d.prepare_ex || ""))) errs.push("then이 연습 재료와 같음");
+    if (th && new RegExp(th.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(으로|로|를|을)\\s*(연습|먹|마시)").test(String(d.prepare_ex || ""))) errs.push("then이 연습 재료와 같음");
     if (/불 끄기|불끄기/.test(lastS) && th && !/자기|잠|자장/.test(th)) errs.push("불 끄기 뒤에 할 수 없는 then");
   }
   const teachS = String(d.teach_ex || "");
@@ -1950,6 +1950,12 @@ function check3(branch, d, opts = {}) {
     if (opts.level === "early" && order.length >= 3 && !se2.includes("‘" + order[order.length - 2] + "’까지는 엄마가 함께")) errs.push("초기 틀을 벗어남(‘마지막 앞 단계’까지는 엄마가 함께)");
     if (opts.level === "mid" && !/엄마가/.test(se2)) errs.push("중간인데 엄마 몫이 없음");
   }
+  if (branch === "behavior" && /찻길|도로|차도|뛰어나|밖으로|현관/.test(String(opts.situation || "")) && /문을 열|나가자|나가면 됩/.test(lines) && !/손을 잡|손 잡|엄마가 먼저 나/.test(lines)) errs.push("뛰어나가는 아이에게 손 잡기 없이 문을 열어 줌");
+  if (/(입|코|얼굴)[을를]?\s*(살짝\s*)?(가려|가리|막아|막고|잡아|잡고)/.test(lines)) errs.push("아이 얼굴·입·코를 가리거나 잡음");
+  if (branch === "behavior" && opts.fn === "unknown" && /직전:/.test(teachS) && !/직전:\s*\(/.test(teachS)) errs.push("기록 예시의 '직전'을 지어냄(괄호로 둘 것)");
+  if (branch === "behavior" && opts.fn === "unknown" && /그 뒤:/.test(teachS) && !/그 뒤:\s*\(/.test(teachS)) errs.push("기록 예시의 '그 뒤'를 지어냄(괄호로 둘 것)");
+  if (branch === "skill" && /까지(는)? 익숙|이미[^.]{0,12}할 수|잘 하지만|잘하지만/.test(String(d.why_ex || ""))) errs.push("why_ex에 지어낸 능력");
+  if (branch === "skill" && opts.level === "mid" && /받쳐/.test(String(d.steps_ex || ""))) errs.push("중간인데 손을 받쳐 도움");
   if (/부터 처음부터/.test(txt)) errs.push("'부터 처음부터' 겹침");
   if (/(두|세|네|다섯) 단계/.test(txt)) errs.push("단계 수를 숫자로 씀(단계 이름을 쓸 것)");
   const inpAll = [opts.situation, opts.comm, opts.likes, opts.after].map((x) => String(x || "")).join(" ");
@@ -3670,6 +3676,18 @@ goals는 위 ESDM 커리큘럼 영역(${
   }
 
   // 고치기: 자료 글자를 고치면 결과에 바로 반영 (복사·인쇄·저장에 그대로 쓰임)
+  // AI 예시 줄 확인: 선생님이 읽고 '확인'(또는 '빼기')해야 복사·인쇄가 열린다
+  const EX_LABEL = { why_ex: "왜 그럴까요 / 왜 연습할까요", prevent_ex: "미리 막기", teach_ex: "대신할 행동", prepare_ex: "준비", steps_ex: "단계별로 돕기" };
+  const exKeys = (r) => (r && r.data && r.data.lib === 3 ? (r.branch === "skill" ? ["why_ex", "prepare_ex", "steps_ex"] : ["why_ex", "prevent_ex", "teach_ex"]).filter((k) => String(r.data[k] || "").trim()) : []);
+  const exPending = (r) => exKeys(r).filter((k) => !(r.data.ex_ok && r.data.ex_ok[k]));
+  function confirmEx(k, remove) {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const data = { ...prev.data, ex_ok: { ...(prev.data.ex_ok || {}), [k]: true } };
+      if (remove) data[k] = "";
+      return { ...prev, data, edited: prev.edited || !!remove };
+    });
+  }
   function editResult(path, value) {
     setResult((prev) => {
       if (!prev) return prev;
@@ -4419,10 +4437,10 @@ goals는 위 ESDM 커리큘럼 영역(${
               <button style={{ ...styles.actBtn, whiteSpace: "nowrap" }} onClick={savePlan} disabled={!result}>
                 💾 저장
               </button>
-              <button style={{ ...styles.actBtn, whiteSpace: "nowrap" }} onClick={copyDoc} disabled={!result}>
+              <button style={{ ...styles.actBtn, whiteSpace: "nowrap", ...(exPending(result).length ? { opacity: 0.45, cursor: "not-allowed" } : {}) }} onClick={copyDoc} disabled={!result || exPending(result).length > 0} title={exPending(result).length ? "AI 예시 줄을 먼저 확인해 주세요" : ""}>
                 📋 카톡용 복사
               </button>
-              <button style={{ ...styles.actBtn, ...styles.actBtnDark, background: result ? RT.main : styles.actBtnDark.background, whiteSpace: "nowrap" }} onClick={printPDF} disabled={!result}>
+              <button style={{ ...styles.actBtn, ...styles.actBtnDark, background: result ? RT.main : styles.actBtnDark.background, whiteSpace: "nowrap", ...(exPending(result).length ? { opacity: 0.45, cursor: "not-allowed" } : {}) }} onClick={printPDF} disabled={!result || exPending(result).length > 0} title={exPending(result).length ? "AI 예시 줄을 먼저 확인해 주세요" : ""}>
                 🖨 인쇄·PDF
               </button>
             </div>
@@ -4458,6 +4476,40 @@ goals는 위 ESDM 커리큘럼 영역(${
               {!editing && result.edited && (
                 <div style={{ fontSize: 12, marginTop: 6, color: C.sub }}>고친 내용이 반영되어 있습니다. 복사·인쇄·저장에 고친 글이 그대로 들어갑니다.</div>
               )}
+            </div>
+          )}
+
+          {result && exKeys(result).length > 0 && (
+            <div style={{ margin: "10px 20px 0", border: `1.5px solid ${exPending(result).length ? "#E0A13A" : "#BFD9C6"}`, background: exPending(result).length ? "#FFF8E6" : "#F2F8F3", borderRadius: 12, padding: "10px 12px" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: exPending(result).length ? "#7A5200" : "#2F6B45", marginBottom: 6 }}>
+                {exPending(result).length
+                  ? `AI가 쓴 예시 줄 ${exPending(result).length}개를 읽고 확인해 주세요. 확인해야 복사·인쇄가 됩니다.`
+                  : "AI 예시 줄을 모두 확인했습니다. 복사·인쇄할 수 있습니다."}
+              </div>
+              {exPending(result).length > 0 && (
+                <div style={{ fontSize: 11.5, color: "#7A5200", marginBottom: 8, lineHeight: 1.5 }}>
+                  원장님 승인 문장과 어긋나거나, 입력하지 않은 내용(좋아하는 것·할 수 있는 것 등)이 들어 있으면 '고치기'로 고치거나 '빼기'를 눌러 주세요.
+                </div>
+              )}
+              {exKeys(result).map((k) => {
+                const ok = result.data.ex_ok && result.data.ex_ok[k];
+                return (
+                  <div key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "7px 0", borderTop: "1px dashed #EAD9B5" }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, lineHeight: 1.6, color: C.ink }}>
+                      <span style={{ fontSize: 11, color: C.sub, marginRight: 6 }}>{k === "why_ex" ? (result.branch === "skill" ? "왜 연습할까요" : "왜 그럴까요") : EX_LABEL[k]}</span>
+                      {result.data[k]}
+                    </div>
+                    {ok ? (
+                      <span style={{ flex: "none", fontSize: 12, color: "#2F6B45", fontWeight: 700 }}>✓ 확인</span>
+                    ) : (
+                      <span style={{ flex: "none", display: "flex", gap: 4 }}>
+                        <button style={{ ...styles.actBtn, padding: "4px 10px", fontSize: 12, background: "#3E8A5E", color: "#fff", border: "none" }} onClick={() => confirmEx(k, false)}>확인</button>
+                        <button style={{ ...styles.actBtn, padding: "4px 10px", fontSize: 12 }} onClick={() => confirmEx(k, true)}>빼기</button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -4525,7 +4577,7 @@ goals는 위 ESDM 커리큘럼 영역(${
 // 갈래별 색 (입력 화면·버튼·목록 표시에 씀. 엄마께 나가는 자료 틀은 BIP와 같은 분홍 유지)
 const BRANCH_THEME = {
   play: { main: "#D9677F", dark: "#A3405A", soft: "#FDEEF1", shadow: "rgba(217,103,127,.28)", icon: "🎈" },
-  skill: { main: "#3E8A5E", dark: "#2B6646", soft: "#E8F4EC", shadow: "rgba(62,138,94,.28)", icon: "🪥" },
+  skill: { main: "#3E8A5E", dark: "#2B6646", soft: "#E8F4EC", shadow: "rgba(62,138,94,.28)", icon: "👕" },
   behavior: { main: "#C9781B", dark: "#8A5300", soft: "#FCF0DF", shadow: "rgba(201,120,27,.28)", icon: "🧭" },
 };
 function FormBox({ n, title, sub, color, soft, children }) {
