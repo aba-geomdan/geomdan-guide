@@ -1792,7 +1792,7 @@ const SKILL_ORDER = {
   "양치": ["칫솔 잡기", "치약 묻히기", "이 닦기", "입 헹구기"],
   "세수": ["소매 걷기", "물 틀기", "손에 물 받기", "얼굴 문지르기", "수건으로 닦기"],
   "머리 감기·목욕": ["몸에 물 묻히기", "거품 내기", "물로 헹구기", "수건으로 닦기"],
-  "코 풀기": ["휴지 뽑기", "코에 대기", "‘흥’ 하고 풀기"],
+  "코 풀기": ["휴지 뽑기", "코에 대기", "흥 하고 풀기"],
   "옷 입고 벗기": ["윗옷 아랫단 잡기", "위로 올리기", "머리 빼기", "팔 빼기"],
   "신발 신기": ["신발 앞으로 놓기", "발 넣기", "뒤꿈치 넣기"],
   "양말 신기": ["양말 입구 벌리기", "발끝 넣기", "뒤꿈치까지 당기기", "위로 올리기"],
@@ -1806,7 +1806,13 @@ const THEN_FIX3 = { "잠자리 준비": "잠자기", "외출 준비": "나가기
 function normalize3(d, b) {
   if (!d || typeof d !== "object") return d;
   if (b && b.branch === "skill" && SKILL_ORDER[b.skill]) d = { ...d, order: SKILL_ORDER[b.skill].slice(), ...(THEN_FIX3[b.skill] ? { then: THEN_FIX3[b.skill] } : {}) };
-  const fix = (s) => (typeof s === "string" ? s.replace(/'([^'\n]{1,40})'/g, "‘$1’").replace(/\s+/g, " ").trim() : s);
+  // 곧은 '를 자리에 따라 여는 ‘ / 닫는 ’로 바꾸고, 겹친 따옴표는 하나로 줄인다(두 번 돌려도 같은 결과)
+  const fix = (s) => (typeof s !== "string" ? s : s
+    .replace(/(^|[\s(\[“"‘])'/g, "$1‘").replace(/'/g, "’")
+    .replace(/‘+/g, "‘").replace(/’+/g, "’")
+    .replace(/([가-힣A-Za-z0-9?!])‘(?=[\s,.!?]|$|는|은|을|를|이|가|와|과|로|도|만|에|처럼|하고|라고)/g, "$1’")
+    .replace(/‘([^‘’]*)‘([^‘’]*)’([^‘’]*)’/g, "‘$1$2$3’")
+    .replace(/\s+/g, " ").trim());
   const out = {};
   for (const [k, v] of Object.entries(d)) out[k] = Array.isArray(v) ? v.map(fix) : fix(v);
   return out;
@@ -1822,7 +1828,7 @@ function allowText3(b, LIB) {
   const fixed = b.branch === "skill" ? JSON.stringify(LIB.skill) : JSON.stringify(LIB.behavior[b.fn] || LIB.behavior.unknown);
   return inp + " " + fixed;
 }
-const TOYS3 = ["북", "실로폰", "모래", "블록", "미끄럼틀", "까꿍", "외투", "벨크로", "찍찍이", "바구니", "인형", "공놀이", "퍼즐", "풍선", "자동차", "영상", "그림책", "베개", "이불", "스티커", "젤리", "과자", "태블릿", "휴대폰", "노래", "공원", "놀이터", "마트"];
+const TOYS3 = ["가방", "음료", "북", "실로폰", "모래", "블록", "미끄럼틀", "까꿍", "외투", "벨크로", "찍찍이", "바구니", "인형", "공놀이", "퍼즐", "풍선", "자동차", "영상", "그림책", "베개", "이불", "스티커", "젤리", "과자", "태블릿", "휴대폰", "노래", "공원", "놀이터", "마트"];
 function check3(branch, d, opts = {}) {
   const errs = [];
   if (!d || typeof d !== "object") return ["JSON 아님"];
@@ -1852,7 +1858,7 @@ function check3(branch, d, opts = {}) {
   }
   const why = String(d.why_ex || "").trim();
   if (why && !/수 있습니다\.?$/.test(why)) errs.push("why_ex는 '~수 있습니다'로 끝낼 것");
-  ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { const v = String(d[k] || "").trim(); if (v.length > 190) errs.push(k + " 너무 김(180자 안으로)"); if (v.startsWith("→")) errs.push(k + " 앞의 →는 쓰지 말 것"); });
+  ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { const v = String(d[k] || "").trim(); if (v.length > 180) errs.push(k + " 너무 김(180자 안으로)"); if (v.startsWith("→")) errs.push(k + " 앞의 →는 쓰지 말 것"); });
   if (opts.name && !lines.includes(opts.name)) errs.push("아이 호칭 없음");
   if (/대신할 행동은/.test(txt)) errs.push("'대신할 행동은 ~' 제목 되풀이");
   const nums = txt.replace(/세 번 더/g, "").replace(/한두|한 번/g, "").replace(/3~5초/g, "");
@@ -1864,7 +1870,7 @@ function check3(branch, d, opts = {}) {
   if (branch === "behavior" && opts.fn === "attention" && /아빠/.test(opts.situation || "") && !/아빠/.test(teach)) errs.push("상황은 아빠인데 아빠 부르기가 없음");
   if (branch === "behavior" && /(박으면|때리면|던지면|물면|지르면|울면|드러누우면|두드리면|흔들면|돌리면|박을 때|때릴 때)[^.]{0,40}(권해|말해|말을 걸|보여 주|막아|안을까|할까)/.test(teach + String(d.prevent_ex || ""))) errs.push("예시 줄에 행동 중 대처를 씀");
   if (branch === "behavior" && opts.fn === "sensory" && /말로|낱말로|소리로|말하며|말하는 연습/.test(teach)) errs.push("자기자극에 말로 요청하기를 넣음");
-  if (branch === "behavior" && /싫어|아니야/.test(teach) && /쉬게|쉬자/.test(teach)) errs.push("‘싫어’·‘아니야’를 쉬자는 말로 받음(원장님 결정 전)");
+  if (branch === "behavior" && /싫어|아니야|안 해/.test(teach) && /쉬게|쉬자/.test(teach)) errs.push("‘싫어’·‘아니야’를 쉬자는 말로 받음(원장님 결정 전)");
   const sentN = (v) => String(v || "").split(/[.!?]\s/).filter((x) => x.trim()).length;
   ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"].forEach((k) => { if (sentN(d[k]) > (k === "teach_ex" ? 3 : 2)) errs.push(k + (k === "teach_ex" ? " 네 문장 이상" : " 세 문장 이상")); });
   if (/시면 되고/.test(lines)) errs.push("'~시면 되고' 연결");
@@ -1906,16 +1912,43 @@ function check3(branch, d, opts = {}) {
     if (need.length) errs.push("꼭 필요한 단계가 빠짐");
     const se = String(d.steps_ex || "");
     if ((opts.level === "mid" || opts.level === "high") && /까지는 엄마가 함께/.test(se)) errs.push("중간·상위인데 초기 틀을 씀");
-    if (opts.level === "mid" && /손만 살짝 받쳐|손을 받쳐/.test(se)) errs.push("중간인데 손을 받쳐 도움");
+    if (opts.level === "mid" && /손[을만]?\s*(살짝\s*)?받쳐/.test(se)) errs.push("중간인데 손을 받쳐 도움");
     if (opts.level === "early" && lastS && !se.includes(lastS)) errs.push("초기인데 마지막 단계 이름이 steps_ex에 없음");
     const stem = (order[0] || "").replace(/\s*(하기|기)$/, "").split(" ").pop().slice(0, 2);
     if (stem && stem.length === 2 && String(d.prepare_ex || "").includes(stem) && /미리|꺼내 두|펼쳐 두/.test(String(d.prepare_ex || ""))) errs.push("준비에서 첫 단계를 엄마가 미리 해 둠");
     const wy = String(d.why_ex || "");
-    if (/익숙해졌|까지는 할 수 있|할 수 있습니다\.?$|낯설|불편/.test(wy)) errs.push("why_ex에 지어낸 능력·느낌");
+    if (/익숙해졌|할 수 있(지만|어도|는데|으나)|까지(는)? 할 수|할 수 있습니다\.?$|낯설|불편/.test(wy)) errs.push("why_ex에 지어낸 능력·느낌");
     if (!/어렵|어려|힘들|헷갈|놓치|흘리|막히/.test(wy)) errs.push("why_ex에 어려운 점이 없음");
     const th = String(d.then || "").trim();
     if (th && String(d.prepare_ex || "").includes(th) && /연습|으로|를 두|을 두/.test(String(d.prepare_ex || ""))) errs.push("then이 연습 재료와 같음");
     if (/불 끄기|불끄기/.test(lastS) && th && !/자기|잠|자장/.test(th)) errs.push("불 끄기 뒤에 할 수 없는 then");
+  }
+  const teachS = String(d.teach_ex || "");
+  {
+    const cm = String(opts.comm || "");
+    const pairs = [[/손 끌기|손으로 끌기/, /손을?\s*끌(면|어도)/], [/울음|울기/, /울면|울어도/], [/밀기/, /밀면|밀어도/], [/소리 지르기|소리지르기/, /소리를 지르면/]];
+    if (branch === "behavior" && pairs.some(([a, b]) => a.test(cm) && b.test(teachS))) errs.push("표현 방법 칸의 행동(손 끌기·울음·밀기)을 알리기로 받음");
+  }
+  if (branch === "behavior" && /카드를 (보거나|보면)|쳐다보면|보기만 해도/.test(teachS)) errs.push("카드를 쳐다보기만 한 것을 알리기로 받음");
+  if (branch === "behavior" && ["tangible", "attention"].includes(opts.fn) && /(보고도|말하지 않으면|안 부르면|부르지 않으면)[^.]{0,30}(말해 보|보여 주)/.test(teachS)) errs.push("행동이 나오는 순간에 시범을 보임");
+  if (branch === "behavior" && ["tangible", "attention"].includes(opts.fn) && !/(부르면|알리면|말하면|건네면|가리키면|두드리면)/.test(teachS)) errs.push("아이가 알리면 준다·다가간다는 조건이 없음");
+  if (/졸릴|졸리|졸려서|피곤해서|피곤하면|피곤한/.test(lines) && !/졸|피곤/.test([opts.situation, opts.after, opts.comm, opts.likes].map((x) => String(x || "")).join(" "))) errs.push("입력에 없는 아이 상태(졸림·피곤)");
+  if (/주시(므로|니까|니|어서)|주셨|나가시면|하시므로/.test(lines)) errs.push("엄마를 높임");
+  if (branch === "behavior" && opts.fn !== "sensory" && /비슷한 느낌/.test(lines)) errs.push("자기자극 방법('비슷한 느낌')이 섞임");
+  if (branch === "behavior" && opts.fn === "sensory" && /박|깨물|때리/.test(String(opts.behavior || "") + String(opts.situation || "")) && /놀아 주|함께 (해|놀)|안아 보|기대어/.test(teachS)) errs.push("다칠 수 있는 자기자극인데 놀이를 권함");
+  if (branch === "behavior" && /찻길|도로|차도|뛰어나/.test(String(opts.situation || "")) && /현관|나가시면|나가면/.test(teachS)) errs.push("뛰어나가는 아이를 현관에서 연습시킴");
+  if (branch === "behavior" && opts.fn === "tangible" && /대신[^.]{0,15}(먹자|사 줄|줄게)|집에 가서[^.]{0,10}(먹자|주)/.test(String(d.prevent_ex || ""))) errs.push("원하는 것을 미리 약속함");
+  if (/짧은 문장으로|문장으로 말하므로|한 낱말로|두 낱말로/.test(lines)) errs.push("입력 칸의 말을 그대로 옮김");
+  if (/보든 말든|거니까|하니까/.test(lines)) errs.push("구어체");
+  if (opts.name) ["why_ex", branch === "skill" ? "steps_ex" : "teach_ex"].forEach((k) => { if (!String(d[k] || "").includes(opts.name)) errs.push(k + "에 아이 호칭 없음"); });
+  for (const k of ["why_ex", "prepare_ex", "steps_ex", "prevent_ex", "teach_ex"]) {
+    const v = String(d[k] || "");
+    if ((v.match(/‘/g) || []).length !== (v.match(/’/g) || []).length || /(^|\s)’/.test(v)) { errs.push(k + " 따옴표 짝이 안 맞음"); break; }
+  }
+  if (branch === "skill") {
+    const se2 = String(d.steps_ex || "");
+    if (opts.level === "early" && order.length >= 3 && !se2.includes("‘" + order[order.length - 2] + "’까지는 엄마가 함께")) errs.push("초기 틀을 벗어남(‘마지막 앞 단계’까지는 엄마가 함께)");
+    if (opts.level === "mid" && !/엄마가/.test(se2)) errs.push("중간인데 엄마 몫이 없음");
   }
   if (/부터 처음부터/.test(txt)) errs.push("'부터 처음부터' 겹침");
   if (/(두|세|네|다섯) 단계/.test(txt)) errs.push("단계 수를 숫자로 씀(단계 이름을 쓸 것)");
