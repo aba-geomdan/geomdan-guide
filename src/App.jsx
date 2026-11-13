@@ -1752,7 +1752,7 @@ function toText(r, view) {
   }
   if (T && d.teacher_note) { sec("선생님용 메모"); L.push(d.teacher_note); }
   L.push("");
-  L.push("© 검단ABA언어행동연구소 | 민다혜 (BCBA)");
+  L.push("© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지");
   return L.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
@@ -2054,7 +2054,7 @@ function toText3(r, view) {
   L.push(NEXT_NOTE);
   if (ev) { sec("이 방법을 쓰는 이유"); L.push(ev.mom); if (T) L.push(`(선생님용 근거) ${ev.teacher}`); }
   L.push("");
-  L.push("© 검단ABA언어행동연구소 | 민다혜 (BCBA)");
+  L.push("© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지");
   return L.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
@@ -3906,7 +3906,7 @@ goals는 위 ESDM 커리큘럼 영역(${
       r.theme.closing.forEach((c, i) => lines.push(` ${i + 1}. ${c}`));
     }
     lines.push("");
-    lines.push("© 검단ABA언어행동연구소 | 민다혜 (BCBA)");
+    lines.push("© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지");
     lines.push("본 자료는 검단ABA언어행동연구소의 지적재산입니다.");
     return lines.join("\n");
   }
@@ -3944,7 +3944,7 @@ goals는 위 ESDM 커리큘럼 영역(${
 <title>가정 자료</title>
 <style>
   *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;word-break:keep-all;}
-  @page{margin:12mm;}
+  @page{size:A4 portrait;margin:22mm 14mm 20mm 14mm;@top-center{content:"검단ABA언어행동연구소";font-family:'Pretendard','Malgun Gothic',sans-serif;font-size:8.5pt;color:#D4728A;font-weight:600;letter-spacing:0.5px}@bottom-center{content:"© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지";font-family:'Pretendard','Malgun Gothic',sans-serif;font-size:6.5pt;color:#bbb;letter-spacing:0.2px}@bottom-right{content:"Page " counter(page) " / " counter(pages);font-family:'Pretendard','Malgun Gothic',sans-serif;font-size:7.5pt;color:#999}}
   body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:${C.ink};padding:0;line-height:1.75;}
   .step{border-radius:12px;padding:18px 20px;margin:14px 0;border:1px solid ${C.line};}
   .step-orange{background:${C.brandSoft};}
@@ -3960,8 +3960,7 @@ goals는 위 ESDM 커리큘럼 영역(${
   /* 인쇄 시 섹션 제목이 본문에 붙는 것 방지 */
   .pdf-head{display:block !important;width:100%;margin-bottom:10px !important;}
   .pdf-theme{display:block !important;margin:2px 0 12px !important;}
-  body > div > div { break-inside: avoid; page-break-inside: avoid; }
-  @media print { body > div > div { break-inside: avoid; page-break-inside: avoid; } }
+  /* 섹션 통째로 다음 쪽으로 넘기지 않음(빈자리가 크게 남음). 카드·표 하나씩만 쪼개지지 않게 하고, 제목은 다음 내용과 붙여 둔다 */
 </style></head><body>${html}
 </body></html>`);
     w.document.close();
@@ -3985,68 +3984,8 @@ goals는 위 ESDM 커리큘럼 영역(${
         <div style={styles.gateCard}>
           <img src={LOGO_DATA_URL} alt="검단ABA" style={styles.logoBadge} />
           <h1 style={styles.gateTitle}>가정 자료</h1>
-          <p style={styles.gateSub}>놀이 루틴 · 생활 기술 · 행동 대처 — 어머님께 보내는 집에서 하는 5분</p>
+          <p style={styles.gateSub}>놀이 루틴 · 생활 기술 · 행동 대처<br />어머님께 보내는 집에서 하는 5분</p>
 
-          <button
-            style={styles.guideToggle}
-            onClick={() => setShowGuide((v) => !v)}
-          >
-            <span>📖 사용법 안내</span>
-            <span>{showGuide ? "▲" : "▼"}</span>
-          </button>
-
-          {showGuide && (
-            <div style={styles.guideBox}>
-              <div style={styles.guideStep}>
-                <span style={styles.guideNum}>1</span>
-                <div>
-                  <div style={styles.guideStepTitle}>무엇을 보낼지 고르기</div>
-                  <div style={styles.guideStepText}>
-                    놀이 루틴, 생활 기술, 행동 대처 중 하나를 고르면 그에 맞는 것만 물어요.
-                  </div>
-                </div>
-              </div>
-              <div style={styles.guideStep}>
-                <span style={styles.guideNum}>2</span>
-                <div>
-                  <div style={styles.guideStepTitle}>필요한 것만 채우기</div>
-                  <div style={styles.guideStepText}>
-                    아이 이름과 놀잇감·기술·행동 등을 고르세요. 목록에 없으면 직접 입력할 수 있어요.
-                  </div>
-                </div>
-              </div>
-              <div style={styles.guideStep}>
-                <span style={styles.guideNum}>3</span>
-                <div>
-                  <div style={styles.guideStepTitle}>만들기</div>
-                  <div style={styles.guideStepText}>
-                    AI가 아이에 맞게 쓰고 앱이 한 번 더 확인해요. 걸리면 미리 쓴 문구로 바뀌고 화면에 표시돼요.
-                  </div>
-                </div>
-              </div>
-              <div style={styles.guideStep}>
-                <span style={styles.guideNum}>4</span>
-                <div>
-                  <div style={styles.guideStepTitle}>엄마용으로 확인</div>
-                  <div style={styles.guideStepText}>
-                    엄마용에는 어머님께 나갈 내용만, 선생님용에는 설명이 함께 보여요. 원장님 허락 후 보내 주세요.
-                  </div>
-                </div>
-              </div>
-              <div style={styles.guideStep}>
-                <span style={styles.guideNum}>5</span>
-                <div>
-                  <div style={styles.guideStepTitle}>복사·인쇄·저장</div>
-                  <div style={styles.guideStepText}>
-                    카톡용으로 복사하거나 인쇄·PDF로 보내고, 저장하면 목록에서 다시 볼 수 있어요.
-                  </div>
-                </div>
-              </div>
-              <div style={styles.guideNote}>
-                💡 계정(이메일·비밀번호)은 관리자(원장님)에게 문의해 주세요.
-              </div>
-            </div>
-          )}
           {/* 브라우저 자동완성 차단용 미끼 필드 (화면에 보이지 않음) */}
           <input type="text" name="username" tabIndex={-1} aria-hidden="true" autoComplete="username" style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none", zIndex: -1 }} />
           <input type="password" name="password" tabIndex={-1} aria-hidden="true" autoComplete="current-password" style={{ position: "absolute", opacity: 0, height: 0, width: 0, pointerEvents: "none", zIndex: -1 }} />
@@ -4081,6 +4020,10 @@ goals는 위 ESDM 커리큘럼 영역(${
           >
             {loggingIn ? "로그인 중…" : "로그인 →"}
           </button>
+          <div style={{ marginTop: 14, textAlign: "center" }}>
+            <button onClick={() => setShowGuide(true)} style={{ border: "1px solid #F5A0B1", background: "#fff", color: "#D4728A", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>📖 사용설명서</button>
+          </div>
+          {showGuide && <ManualModal onClose={() => setShowGuide(false)} />}
           <div style={styles.gateFoot}>
             © 검단ABA언어행동연구소 | 민다혜 (BCBA)
             <br />
@@ -4636,7 +4579,7 @@ const hs = {
   grid: { display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, marginTop: 4 },
   cell: { height: 38, border: `1px solid ${PINK_LINE}`, borderRadius: 6, fontSize: 11, color: C.sub, textAlign: "center", paddingTop: 3, boxSizing: "border-box" },
   meta: { fontSize: 12.5, color: "#5E5257", background: "#F4F1F2", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.6 },
-  why: { border: `1px dashed ${PINK}`, borderRadius: 10, padding: "10px 14px", background: "#fff" },
+  why: { border: `1px dashed ${PINK}`, borderRadius: 10, padding: "10px 14px", background: "#fff" , breakInside: "avoid", pageBreakInside: "avoid" },
   ex: { fontSize: 13, background: "#FFFBEF", border: "1px solid #F1E3C2", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", color: "#5A4520", lineHeight: 1.65, breakInside: "avoid", pageBreakInside: "avoid" },
   exT: { fontSize: 13, background: "#FFF8E6", border: "1px dashed #E0A13A", borderRadius: 8, padding: "6px 10px", margin: "4px 0 8px", color: "#6b4a00", lineHeight: 1.65 },
   exTag: { marginLeft: 6, fontSize: 11, color: "#B07A12", border: "1px solid #E0A13A", borderRadius: 4, padding: "0 4px" },
@@ -4671,6 +4614,47 @@ function Ed({ p }) {
   );
 }
 const eds = (d, key) => (d[key] || []).map((_, i) => <Ed key={i} p={[key, i]} />);
+
+// 사용설명서(통합본과 같은 모양의 팝업)
+function ManualModal({ onClose }) {
+  const sec = (title, lines) => (
+    <section style={{ marginBottom: 20 }}>
+      <h3 style={{ fontSize: 15, color: "#D4728A", margin: "0 0 8px", fontWeight: 700 }}>{title}</h3>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.8, color: "#444" }}>
+        {lines.map((l, i) => <li key={i}>{l}</li>)}
+      </ul>
+    </section>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 10002, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "28px 26px", maxWidth: 560, width: "100%", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)", textAlign: "left" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <h2 style={{ fontSize: 18, color: "#D4728A", margin: 0, fontWeight: 800 }}>📖 사용설명서</h2>
+          <button onClick={onClose} style={{ border: "none", background: "#f3f3f3", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#666" }}>✕</button>
+        </div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#333", marginBottom: 16 }}>검단ABA 가정 자료 사용설명서</div>
+        {sec("1. 무엇을 보낼지 고르기", ["놀이 루틴, 생활 기술, 행동 대처 중 하나를 고르면 그에 맞는 것만 물어요."])}
+        {sec("2. 필요한 것만 채우기", [
+          "아이 이름과 놀잇감·기술·행동을 고르세요.",
+          "이름과 ‘언제·어떤 모습인지’를 적을수록 그 아이 이야기가 됩니다.",
+          "‘센터에서 본 모습’에 적은 글은 엄마 자료에 그대로 들어가니 엄마가 읽기 쉬운 말로 적어 주세요.",
+        ])}
+        {sec("3. 만들기", [
+          "놀이 루틴은 AI가 아이에 맞게 써요.",
+          "생활 기술·행동 대처는 원장님이 승인한 문장이 그대로 들어가고, AI는 ‘→ ○○라면’ 예시 줄만 써요.",
+          "예시 줄이 검사에 걸리면 빠지고 승인 문장만 나와요. 다시 만들기를 누르면 다시 받아 볼 수 있어요.",
+        ])}
+        {sec("4. AI 예시 줄 확인", [
+          "생활 기술·행동 대처는 노란 상자의 예시 줄을 한 줄씩 읽고 ‘확인’ 또는 ‘빼기’를 눌러야 복사·인쇄가 돼요.",
+          "고칠 곳은 ‘고치기’로 고친 뒤 확인을 눌러 주세요.",
+        ])}
+        {sec("5. 엄마용으로 확인", ["엄마용에는 어머님께 나갈 내용만, 선생님용에는 설명이 함께 보여요.", "원장님 허락 후 보내 주세요."])}
+        {sec("6. 복사·인쇄·저장", ["카톡용으로 복사하거나 인쇄·PDF로 보내고, 저장하면 목록에서 다시 볼 수 있어요.", "계정(이메일·비밀번호)은 관리자(원장님)에게 문의해 주세요."])}
+        <div style={{ marginTop: 8, paddingTop: 14, borderTop: "1px solid #eee", fontSize: 11, color: "#999", textAlign: "center" }}>© 검단ABA언어행동연구소 (민다혜). All rights reserved.</div>
+      </div>
+    </div>
+  );
+}
 
 function Sec({ n, h, children }) {
   return (
@@ -5118,7 +5102,7 @@ function HomeSheetBody({ r, view }) {
 
       <div style={hs.foot}>
         궁금한 점은 담당 선생님께 편하게 물어봐 주세요.
-        <br />© 검단ABA언어행동연구소 (민다혜). All rights reserved.
+        <br />© 검단ABA언어행동연구소 · 민다혜(BCBA) — 무단 복제·배포·재판매 금지
       </div>
     </div>
   );
