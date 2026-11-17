@@ -2977,16 +2977,13 @@ export default function App() {
   }, []);
 
   // ---- AI 생성 백엔드 호출 (공용 claude-relay — BIP와 동일 방식) ----
-  // 로그인 토큰이 아니라 anon key 로 호출 (릴레이가 로그인 검증을 하지 않음).
+  // 로그인 토큰으로 호출 (2026-11-17: esdm-relay 가 로그인한 사람만 쓰게 바뀜).
   // SSE(text/event-stream) 또는 JSON 응답 양쪽을 처리해 { text } 로 반환.
   // onProgress(받은 글자수) 콜백으로 진행 상황을 알린다.
   async function api(action, payload = {}, onProgress) {
     const res = await fetch(ESDM_RELAY_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
+      headers: await authHeaders(),
       body: JSON.stringify({
         // 프롬프트가 아니라 '재료'만 전송 — 서버가 프롬프트를 조립한다.
         levels: payload.levels || [],
