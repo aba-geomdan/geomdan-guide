@@ -4649,6 +4649,28 @@ function Ed({ p }) {
   );
 }
 const eds = (d, key) => (d[key] || []).map((_, i) => <Ed key={i} p={[key, i]} />);
+// 제공일: 처음엔 만든 날, 고치기에서 달력으로 바꿀 수 있음 (바꾼 날은 저장·인쇄에 그대로 쓰임)
+function localYmd(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d)) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function EdDate({ made }) {
+  const { edit, onEdit, data } = React.useContext(EditCtx);
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.test(String(data.provided || "")) ? data.provided : localYmd(made);
+  const [y, m, dd] = ymd.split("-").map(Number);
+  const shown = ymd ? `${y}. ${m}. ${dd}.` : "";
+  if (!edit || !onEdit) return <>{shown}</>;
+  return (
+    <input
+      type="date"
+      value={ymd}
+      onChange={(e) => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) onEdit(["provided"], e.target.value); }}
+      style={{ outline: "1.5px dashed #E0A13A", background: "#FFF8E6", border: "none", borderRadius: 4, padding: "1px 4px", fontSize: "inherit", fontFamily: "inherit", color: "inherit" }}
+      aria-label="제공일"
+    />
+  );
+}
 
 // 사용설명서(통합본과 같은 모양의 팝업)
 function ManualModal({ onClose }) {
@@ -4984,7 +5006,7 @@ function HomeSheetBody({ r, view }) {
             <th style={hs.th}>자료</th>
             <td style={hs.td}>{kind}</td>
             <th style={hs.th}>제공일</th>
-            <td style={hs.td}>{fmtDate(r.made)}</td>
+            <td style={hs.td}><EdDate made={r.made} /></td>
           </tr>
         </tbody>
       </table>
