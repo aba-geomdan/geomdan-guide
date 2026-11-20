@@ -2302,16 +2302,25 @@ async function plansList() {
   }
 }
 
-async function plansInsert({ title, levels, toys, domains, plan }) {
+async function plansInsert({ title, levels, toys, domains, plan, childId }) {
   try {
     const headers = await authHeaders();
     const user = await getCurrentUser();
     if (!user?.id) return { error: "로그인이 필요합니다." };
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/esdm_plans`, {
+    const row = { user_id: user.id, title, levels, toys, domains, plan };
+    // ★ [통합본 연결] 통합본에서 아이로 연 경우에만 아이 번호를 함께 적는다
+    if (childId) row.child_id = childId;
+    const post = () => fetch(`${SUPABASE_URL}/rest/v1/esdm_plans`, {
       method: "POST",
       headers: { ...headers, Prefer: "return=representation" },
-      body: JSON.stringify({ user_id: user.id, title, levels, toys, domains, plan }),
+      body: JSON.stringify(row),
     });
+    let r = await post();
+    if (!r.ok && childId) {
+      // 아이 번호 칸이 아직 없을 때(SQL 전): 연결 없이 지금처럼 저장
+      delete row.child_id;
+      r = await post();
+    }
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
       return { error: data.message || "저장 실패" };
@@ -3837,6 +3846,8 @@ goals는 위 ESDM 커리큘럼 영역(${
         toys: isPlay ? result.input?.toys || toys : [],
         domains: [BRANCH_LABEL[result.branch] || "놀이 루틴"],
         plan: { ...result, _child: { name: childName, birthDate } },
+        // ★ [통합본 연결] 원장님이 통합본에서 연 아이 그대로일 때만 (이름을 다른 아이로 바꿨으면 연결하지 않음)
+        childId: me && me.role === "admin" && abaLink && abaLink.name && childName.trim() === abaLink.name.trim() ? abaLink.cid : undefined,
       });
       if (res.error) {
         setError("저장에 실패했습니다.");
